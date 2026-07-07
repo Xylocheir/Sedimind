@@ -1,0 +1,15 @@
+<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="14.000000" height="14.000000" fill="none" customFrame="#000000">
+	<defs>
+		<clipPath id="clipPath_33">
+			<rect width="14.000000" height="14.000000" x="0.000000" y="0.000000" fill="rgb(255,255,255)" />
+		</clipPath>
+	</defs>
+	<g id="Delete">
+		<g id="trash 1" clip-path="url(#clipPath_33)" customFrame="url(#clipPath_33)">
+			<rect id="trash 1" width="14.000000" height="14.000000" x="0.000000" y="0.000000" />
+			<path id="矢量 5636" d="M11.0832 3.5L11.0832 11.6667C11.0832 11.8715 11.0293 12.0726 10.9269 12.25C10.8245 12.4274 10.6772 12.5746 10.4998 12.677C10.3225 12.7794 10.1213 12.8333 9.9165 12.8333L4.08317 12.8333C3.87838 12.8333 3.67719 12.7794 3.49984 12.677C3.32248 12.5746 3.1752 12.4274 3.07281 12.25C2.97041 12.0726 2.9165 11.8715 2.9165 11.6667L2.9165 3.5" fill-rule="nonzero" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+			<path id="矢量 5637" d="M1.75 3.5L12.25 3.5" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+			<path id="矢量 5638" d="M4.6665 3.49996L4.6665 2.33329C4.6665 2.1285 4.72041 1.92731 4.82281 1.74996C4.9252 1.5726 5.07248 1.42533 5.24984 1.32293C5.42719 1.22053 5.62838 1.16663 5.83317 1.16663L8.1665 1.16663C8.3713 1.16663 8.57248 1.22053 8.74984 1.32293C8.92719 1.42533 9.07447 1.5726 9.17687 1.74996C9.27926 1.92732 9.33317 2.1285 9.33317 2.33329L9.33317 3.49996" fill-rule="nonzero" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+		</g>
+	</g>
+</svg>

@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build output — source maps only.
+# main.js and styles.css are committed at the repo root so the plugin is
+# installable directly from GitHub (BRAT / community store). This matches the
+# official Obsidian sample-plugin template.
+*.js.map
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+build.log
+
+# Environment variables
+.env
+.env.local
+
+# Local plugin data / vault artifacts (never commit user data)
+data.json
+.sediment/
+.obsidian/
+
+# Release staging bundle (separate publish folder)
+Sedimind-plugin/
+
+# Test coverage
+coverage/
+.nyc_output/

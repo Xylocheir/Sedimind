@@ -1,0 +1,17 @@
+<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="14.000000" height="14.000000" fill="none" customFrame="#000000">
+	<defs>
+		<clipPath id="clipPath_25">
+			<rect width="14.000000" height="14.000000" x="0.000000" y="0.000000" fill="rgb(255,255,255)" />
+		</clipPath>
+	</defs>
+	<g id="Expand">
+		<g id="list-chevrons-up-down 1" clip-path="url(#clipPath_25)" customFrame="url(#clipPath_25)">
+			<rect id="list-chevrons-up-down 1" width="14.000000" height="14.000000" x="0.000000" y="0.000000" />
+			<path id="矢量 4944" d="M1.75 2.91667L6.41667 2.91667" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+			<path id="矢量 4945" d="M1.75 7L6.41667 7" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+			<path id="矢量 4946" d="M1.75 11.0833L6.41667 11.0833" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+			<path id="矢量 4947" d="M8.75 4.66667L10.5 2.91667L12.25 4.66667" fill-rule="nonzero" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+			<path id="矢量 4948" d="M8.75 9.33333L10.5 11.0833L12.25 9.33333" fill-rule="nonzero" stroke="rgb(0,0,0)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.166667" />
+		</g>
+	</g>
+</svg>
