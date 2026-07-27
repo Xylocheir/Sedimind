@@ -1,225 +1,225 @@
-# 贡献指南
+# Contributing to Sedimind
 
-欢迎贡献代码！本文档描述了如何为 Sedimind 插件贡献代码。
+Thank you for your interest in contributing! This document explains how to contribute code to the Sedimind plugin.
 
 ---
 
-## 开发环境
+## Development environment
 
-### 前置条件
+### Prerequisites
 
 - Node.js >= 18.x
 - npm >= 9.x
 - Obsidian >= 1.5.0
 
-### 设置开发环境
+### Set up the dev environment
 
 ```bash
-# 克隆仓库
+# Clone the repository
 git clone https://github.com/Xylocheir/Sedimind.git
 cd Sedimind
 
-# 安装依赖
+# Install dependencies
 npm install
 
-# 开发模式（自动重新编译）
+# Dev mode (auto-recompile on change)
 npm run dev
 ```
 
-### 测试插件
+### Test the plugin
 
-1. 在 Obsidian 中，创建一个测试 vault
-2. 在 vault 的 `.obsidian/plugins/` 目录下创建 `Sedimind` 文件夹
-3. 使用符号链接将项目目录链接到插件目录：
+1. In Obsidian, create a test Vault.
+2. Inside the Vault, create a `Sedimind` folder under `.obsidian/plugins/`.
+3. Symlink the project directory into the plugin folder:
 
 ```bash
-# macOS/Linux
+# macOS / Linux
 ln -s /path/to/your/project/Sedimind /path/to/vault/.obsidian/plugins/Sedimind
 
-# Windows（PowerShell）
+# Windows (PowerShell)
 New-Item -ItemType SymbolicLink -Path "C:\path\to\vault\.obsidian\plugins\Sedimind" -Target "C:\path\to\your\project\Sedimind"
 ```
 
-4. 重启 Obsidian → 设置 → 社区插件 → 启用 "Sedimind"
+4. Restart Obsidian → Settings → Community plugins → enable "Sedimind".
 
 ---
 
-## 代码规范
+## Code conventions
 
-### 命名规范
+### Naming
 
-- **文件命名**：PascalCase（如 `ChatView.ts`）
-- **工具文件**：PascalCase + Tool 后缀（如 `CreateNoteTool.ts`）
-- **TypeScript 接口**：PascalCase（如 `LLMProvider`）
-- **变量**：camelCase
-- **函数**：camelCase，动词开头
-- **CSS 类名**：kebab-case，`llm-chat-` 前缀
+- **Files**: PascalCase (e.g. `ChatView.ts`)
+- **Tool files**: PascalCase + `Tool` suffix (e.g. `CreateNoteTool.ts`)
+- **TypeScript interfaces**: PascalCase (e.g. `LLMProvider`)
+- **Variables**: camelCase
+- **Functions**: camelCase, verb-led
+- **CSS classes**: kebab-case, `sedimind-` prefix
 
-### 注释要求
+### Comments
 
-- **公共 API**：JSDoc 格式，包含 `@param`、`@returns`
-- **非显而易见的算法**：一行注释说明意图
-- **HACK / TODO / FIXME**：注明原因和预期修复版本
+- **Public APIs**: JSDoc format with `@param` and `@returns`
+- **Non-obvious algorithms**: one-line comment stating intent
+- **HACK / TODO / FIXME**: note the reason and the expected fix version
 
-### TypeScript 配置
+### TypeScript config
 
 - `noImplicitAny`: true
 - `strictNullChecks`: true
-- 禁止使用 `any` 类型（如无充分理由）
+- Avoid the `any` type unless strongly justified
 
-### 错误处理
+### Error handling
 
-- 所有异步调用必须有 `.catch()` 或 `try/catch`
-- `fetch()` 响应必须先检查 `response.ok`
-- 文件操作必须包 `try/catch`
+- Every async call must have `.catch()` or `try/catch`
+- `fetch()` responses must be checked with `response.ok` first
+- File operations must be wrapped in `try/catch`
 
 ---
 
-## 提交规范
+## Commit conventions
 
-### Commit 信息格式
+### Commit message format
 
 ```
 type(scope): description
 ```
 
-**type 可选值**：
-- `feat` - 新功能
-- `fix` - 修复 Bug
-- `refactor` - 重构（不改变功能）
-- `docs` - 文档更新
-- `style` - 代码格式调整
-- `test` - 测试相关
-- `chore` - 构建/工具相关
+**Allowed `type` values**:
+- `feat` - new feature
+- `fix` - bug fix
+- `refactor` - refactor (no behavior change)
+- `docs` - documentation update
+- `style` - formatting only
+- `test` - test-related
+- `chore` - build / tooling
 
-**示例**：
+**Examples**:
 ```
-feat(chat): 添加消息区设置面板功能
-fix(menu): 修复引用菜单首次打开位置错误
-refactor(llm): 重构 Provider 接口
-docs(readme): 更新安装说明
+feat(chat): add message-area settings panel
+fix(menu): fix first-open position of mention menu
+refactor(llm): refactor Provider interface
+docs(readme): update install instructions
 ```
 
-### Pull Request 规范
+### Pull Request conventions
 
-1. **一个 PR 只做一件事**：禁止混合功能开发、重构、格式调整
-2. **描述清楚**：说明修改的目的、实现方式、测试方法
-3. **通过编译**：确保 `npm run build` 无错误
-4. **更新文档**：如有需要，更新 README.md、CHANGELOG.md
-
----
-
-## 功能开发流程
-
-### 1. 提出需求
-
-在 GitHub Issues 中提出功能需求或 Bug 报告，描述：
-- 需求背景
-- 预期行为
-- 实际行为（如 Bug）
-- 复现步骤
-
-### 2. 讨论方案
-
-与维护者讨论实现方案，确认技术细节。
-
-### 3. 开发实现
-
-- 创建功能分支
-- 实现功能
-- 添加必要的注释
-- 测试功能
-
-### 4. 提交 PR
-
-- 提交代码到功能分支
-- 创建 Pull Request
-- 等待审核
+1. **One PR, one thing**: never mix feature work, refactors, and formatting.
+2. **Describe clearly**: purpose, implementation, how it was tested.
+3. **Build passes**: ensure `npm run build` has no errors.
+4. **Update docs**: update README / CHANGELOG when relevant.
 
 ---
 
-## Bug 修复流程
+## Feature development flow
 
-### 1. 报告 Bug
+### 1. Propose
 
-在 GitHub Issues 中报告 Bug，包含：
-- Obsidian 版本
-- 插件版本
-- 复现步骤
-- 预期行为
-- 实际行为
-- 截图（如有）
+Open a GitHub Issue describing the feature or bug:
+- Background / motivation
+- Expected behavior
+- Actual behavior (for bugs)
+- Reproduction steps
 
-### 2. 定位问题
+### 2. Discuss
 
-- 根据复现步骤定位问题
-- 检查相关代码
-- 分析根因
+Discuss the implementation approach with the maintainers and confirm technical details.
 
-### 3. 修复验证
+### 3. Implement
 
-- 实现修复
-- 验证修复效果
-- 确保没有引入新问题
+- Create a feature branch
+- Implement the feature
+- Add necessary comments
+- Test the feature
 
-### 4. 提交 PR
+### 4. Submit PR
 
-- 提交修复代码
-- 在 PR 中描述修复内容和验证方法
+- Push to the feature branch
+- Open a Pull Request
+- Wait for review
 
 ---
 
-## 文档贡献
+## Bug fix flow
 
-### 更新文档
+### 1. Report
 
-- README.md：项目介绍、安装、使用说明
-- CHANGELOG.md：版本变更记录
-- UsageGuide.md：详细使用说明
-- rules.md：开发规范（内部文档）
-- Features.md：功能统计（内部文档）
+Open a GitHub Issue with:
+- Obsidian version
+- Plugin version
+- Reproduction steps
+- Expected behavior
+- Actual behavior
+- Screenshots (if any)
 
-### 文档规范
+### 2. Locate
 
-- 使用 Markdown 格式
-- 中英文混合使用（标题英文，内容中文）
-- 保持格式统一
-- 使用清晰的层次结构
+- Reproduce following the steps
+- Inspect the relevant code
+- Analyze the root cause
 
----
+### 3. Fix & verify
 
-## 测试
+- Implement the fix
+- Verify the result
+- Ensure no regressions
 
-### 手动测试
+### 4. Submit PR
 
-每个功能变更都需要进行手动测试：
-
-1. **基本功能测试**：确保核心功能正常工作
-2. **边界条件测试**：测试极端情况
-3. **回归测试**：确保修改没有影响其他功能
-4. **兼容性测试**：在不同 Obsidian 版本上测试
-
-### 测试清单
-
-- [ ] 插件可正常安装和启用
-- [ ] 设置面板可正常配置
-- [ ] 对话功能正常（发送、接收、流式输出）
-- [ ] 工具调用正常（创建、编辑、搜索笔记等）
-- [ ] 引用系统正常（@ 菜单、拖拽引用）
-- [ ] 历史面板正常（加载、删除）
-- [ ] 设置面板正常（打开、关闭、滚动）
-- [ ] AI 助手弹窗正常（打开、拖拽、预览、确认）
-- [ ] 划词工具栏正常（弹出、操作）
-- [ ] 多语言切换正常
-- [ ] 模型切换正常
+- Push the fix
+- Describe the fix and verification method in the PR
 
 ---
 
-## 联系我们
+## Documentation contributions
 
-如有问题或建议，欢迎通过以下方式联系：
+### Update docs
 
-- GitHub Issues：https://github.com/Xylocheir/Sedimind/issues
-- Discussions：https://github.com/Xylocheir/Sedimind/discussions
+- `README.md`: project intro, install, usage (English, primary)
+- `README_zh.md`: Chinese version
+- `CHANGELOG.md`: version change log
+- `UsageGuide.md`: detailed usage (internal)
+- `rules.md`: dev rules (internal)
+- `Features.md`: feature stats (internal)
 
-感谢你的贡献！
+### Doc conventions
+
+- Use Markdown
+- Clear, consistent hierarchy
+- Keep formatting uniform
+
+---
+
+## Testing
+
+### Manual testing
+
+Every functional change requires manual testing:
+
+1. **Basic**: core features work
+2. **Boundary**: extreme inputs
+3. **Regression**: no impact on other features
+4. **Compatibility**: across Obsidian versions
+
+### Test checklist
+
+- [ ] Plugin installs and enables correctly
+- [ ] Settings panel configures correctly
+- [ ] Chat works (send / receive / streaming)
+- [ ] Tool calls work (create / edit / search notes, etc.)
+- [ ] Mention system works (@ menu, drag-to-reference)
+- [ ] History panel works (load / delete)
+- [ ] Settings panel works (open / close / scroll)
+- [ ] AI assistant modal works (open / drag / preview / confirm)
+- [ ] Selection toolbar works (popup / actions)
+- [ ] Language switching works
+- [ ] Model switching works
+
+---
+
+## Contact
+
+Questions or suggestions are welcome via:
+
+- GitHub Issues: https://github.com/Xylocheir/Sedimind/issues
+- Discussions: https://github.com/Xylocheir/Sedimind/discussions
+
+Thanks for contributing!
