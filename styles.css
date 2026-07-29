@@ -3070,3 +3070,51 @@
   .llm-tb-row-disabled .llm-tb-ic { opacity: .4; }
   .llm-tb-row-disabled .llm-tb-name { color: var(--text-faint); }
   .llm-tb-row-disabled .llm-tb-cb { opacity: .6; }
+
+/* ====== 沉积层：虫洞对照弹窗（🪱）====== */
+.wormhole-hit {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+.wormhole-rel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+.wormhole-excerpt {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 4px 0;
+  border-top: 1px dashed var(--background-modifier-border);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ====== 沉积层：认知杂交灵感弹窗（💡）====== */
+.hybrid-item {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+.hybrid-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+.hybrid-synthesis {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

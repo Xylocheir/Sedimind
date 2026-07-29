@@ -1,7 +1,7 @@
 {
   "id": "Sedimind",
   "name": "Sedimind",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "minAppVersion": "1.5.0",
   "description": "通过对话与本地或云端 LLM 交互，实现创建、编辑、搜索笔记等功能。",
   "author": "Xylocheir",

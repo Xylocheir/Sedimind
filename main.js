@@ -1330,14 +1330,69 @@ var init_tools = __esm({
   }
 });
 
+// src/sediment/core/llm-json.ts
+async function callJSON(provider, prompt) {
+  let resp;
+  try {
+    resp = await provider.chat([{ role: "user", content: prompt }], []);
+  } catch (e) {
+    console.error("[sediment] callJSON chat failed:", e);
+    return null;
+  }
+  const text = (resp && resp.content ? resp.content : "").trim();
+  if (!text)
+    return null;
+  const m = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/);
+  if (!m)
+    return null;
+  try {
+    return JSON.parse(m[1] !== void 0 ? m[1] : m[0]);
+  } catch (e) {
+    console.error("[sediment] callJSON parse failed:", e);
+    return null;
+  }
+}
+var init_llm_json = __esm({
+  "src/sediment/core/llm-json.ts"() {
+  }
+});
+
+// src/sediment/capture-extractor.ts
+async function extractAndRoute(provider, chatText, _s) {
+  const result = await callJSON(provider, `${PROMPT}
+
+${chatText}`);
+  if (!result)
+    return null;
+  return {
+    cognitive_nodes: Array.isArray(result.cognitive_nodes) ? result.cognitive_nodes : [],
+    stable_facts: Array.isArray(result.stable_facts) ? result.stable_facts : []
+  };
+}
+var PROMPT;
+var init_capture_extractor = __esm({
+  "src/sediment/capture-extractor.ts"() {
+    init_llm_json();
+    PROMPT = `\u4F60\u662F Sedimind \u6C89\u79EF\u5C42\u62BD\u53D6\u5668\u3002\u9605\u8BFB\u4E0B\u9762\u4E00\u6BB5\u5BF9\u8BDD\uFF0C\u8F93\u51FA\u4E25\u683C JSON\uFF1A
+{
+  "cognitive_nodes": [
+    {"content":"\u4E00\u53E5\u8BDD\u8BA4\u77E5\u8282\u70B9\uFF08AI \u7684\u524D\u63D0 / \u7528\u6237\u7684\u8F6C\u6298 / \u5173\u952E\u51B3\u7B56\uFF09","facies":"assumption|reasoning|conclusion|question|decision|correction|reference","stance":"pro|con|neutral|tension"}
+  ],
+  "stable_facts": ["\u5173\u4E8E\u7528\u6237\u672C\u4EBA\u7684\u7A33\u5B9A\u4E8B\u5B9E\uFF0C\u6BCF\u884C\u4E00\u6761\uFF0C\u53EF\u7A7A\u6570\u7EC4"]
+}
+\u89C4\u5219\uFF1A\u53EA\u62BD"\u8BA4\u77E5\u8282\u70B9"\u800C\u975E\u6574\u6BB5\u5BF9\u8BDD\uFF1B\u4E0D\u8981\u590D\u8FF0\uFF1B\u53EA\u8F93\u51FA JSON\uFF0C\u65E0\u524D\u540E\u7F00\u3002`;
+  }
+});
+
 // src/chat/MessageHandler.ts
-var import_obsidian11, MessageHandler;
+var import_obsidian11, _MessageHandler, MessageHandler;
 var init_MessageHandler = __esm({
   "src/chat/MessageHandler.ts"() {
     import_obsidian11 = require("obsidian");
     init_llm();
     init_tools();
-    MessageHandler = class {
+    init_capture_extractor();
+    _MessageHandler = class _MessageHandler {
       constructor(app, settings, ui, customSystemPrompt, mcpManager, memoryManager, sedimentManager) {
         this.messages = [];
         this.isProcessing = false;
@@ -1419,19 +1474,29 @@ var init_MessageHandler = __esm({
       async updateSystemPrompt() {
         let prompt = this.customSystemPrompt || this.settings.systemPrompt;
         if (this.memoryManager) {
-          prompt += this.memoryManager.getRecentConversationsContext();
-          const savedMemory = await this.memoryManager.getSavedMemoryContext();
-          if (savedMemory) {
-            prompt += savedMemory;
+          const memoryCtx = await this.memoryManager.getMemoryContext();
+          if (memoryCtx) {
+            prompt += memoryCtx;
           }
         }
-        if (this.settings.enableSavedMemory) {
+        if (this.settings.enableMemory) {
           if (this.settings.enableSediment && this.sedimentManager) {
             prompt += `
 
 [\u6C89\u79EF\u5C42\u534F\u8BAE] \u5728\u7ED9\u51FA\u6700\u7EC8\u7B54\u6848\u4E4B\u524D\uFF0C\u8BF7\u5148\u7528 <think> \u6807\u7B7E\u5199\u51FA\u4F60\u7684\u601D\u8003\u8FC7\u7A0B\uFF0C\u5305\u62EC\u4F60\u8003\u8651\u8FC7\u7684\u4E0D\u540C\u601D\u8DEF\u548C\u653E\u5F03\u7684\u7406\u7531\u3002
 \u683C\u5F0F\uFF1A<think>\u601D\u8003\u5185\u5BB9</think>\u3002\u8FD9\u90E8\u5206\u4E0D\u4F1A\u88AB\u7528\u6237\u770B\u5230\uFF0C\u4F1A\u88AB\u81EA\u52A8\u5265\u79BB\u5E76\u6C89\u79EF\u3002\u4E0D\u8981\u5728\u5DE5\u5177\u8C03\u7528\u4E2D\u95F4\u56DE\u5408\u8F93\u51FA <think>\uFF0C\u53EA\u5728\u6700\u7EC8\u56DE\u7B54\u524D\u8F93\u51FA\u3002
 `;
+            if (this.settings.enableSedimentAnalysis) {
+              const ctx = this.sedimentManager.buildInjectionContext();
+              if (ctx && ctx.blocks.length > 0) {
+                const inj = ctx.blocks.map((b) => `- ${b.excerpt}`).join("\n");
+                prompt += `
+
+[\u6C89\u79EF\u5C42\u53CD\u5DEE\u6CE8\u5165] \u4EE5\u4E0B\u4E3A\u5386\u53F2\u4E0A\u9AD8\u5B58\u6D3B\u6216\u76F8\u5173\u7684\u6C89\u79EF\u7247\u6BB5\uFF0C\u4F9B\u4F60\u53C2\u8003\u6216\u523B\u610F\u4E0E\u4E4B\u5BF9\u7167\uFF08\u5B83\u4EEC\u53EF\u80FD\u5DF2\u8FC7\u65F6\uFF0C\u8BF7\u81EA\u884C\u5224\u65AD\uFF09\uFF1A
+${inj}
+`;
+              }
+            }
           }
           prompt += `
 
@@ -1458,17 +1523,6 @@ var init_MessageHandler = __esm({
       appendMessage(role, content) {
         this.messages.push({ role, content });
         this.trimHistory();
-      }
-      /** 保存对话摘要到记忆系统 */
-      async saveConversationSummary(title) {
-        if (!this.memoryManager)
-          return;
-        const summary = this.memoryManager.generateSummary(this.messages);
-        await this.memoryManager.saveRecentConversation(
-          `conv_${Date.now()}`,
-          title,
-          summary
-        );
       }
       async sendMessage(userContent) {
         if (this.isProcessing) {
@@ -1499,8 +1553,13 @@ var init_MessageHandler = __esm({
         }
       }
       async runConversationLoop() {
+        var _a;
+        const maxIterations = this.settings.maxToolIterations || 10;
         let iteration = 0;
-        const maxIterations = 10;
+        let stoppedReason = null;
+        const userText = ((_a = this.messages.filter((m) => m.role === "user").pop()) == null ? void 0 : _a.content) || "";
+        const callHistory = [];
+        const failStreak = {};
         while (iteration < maxIterations) {
           iteration++;
           this.ui.onThinking(true);
@@ -1519,6 +1578,7 @@ var init_MessageHandler = __esm({
           this.trimHistory();
           if (!response.tool_calls || response.tool_calls.length === 0) {
             this.ui.onAssistantMessage(response.content);
+            void this.extractAndRoute(userText, response.content);
             return;
           }
           for (const toolCall of response.tool_calls) {
@@ -1530,6 +1590,12 @@ var init_MessageHandler = __esm({
               args = {};
             }
             this.ui.onToolCall(name, args);
+            const sig = name + "::" + JSON.stringify(args);
+            if (callHistory.length && callHistory[callHistory.length - 1] === sig) {
+              stoppedReason = `\u68C0\u6D4B\u5230\u5DE5\u5177\u300C${name}\u300D\u88AB\u53CD\u590D\u8C03\u7528\u4E14\u672A\u4EA7\u751F\u8FDB\u5C55\uFF0C\u5DF2\u63D0\u524D\u505C\u6B62\u4EE5\u907F\u514D\u6B7B\u5FAA\u73AF\u3002\u8BF7\u68C0\u67E5\u8BE5\u5DE5\u5177\u5B9E\u73B0\uFF0C\u6216\u7B80\u5316\u4F60\u7684\u8BF7\u6C42\u3002`;
+              break;
+            }
+            callHistory.push(sig);
             if (name === "save_memory" && this.memoryManager) {
               const memoryContent = args.content || String(args);
               await this.memoryManager.saveMemory(memoryContent);
@@ -1556,10 +1622,83 @@ var init_MessageHandler = __esm({
               content: result
             });
             this.trimHistory();
+            if (result.startsWith("\u6267\u884C\u5DE5\u5177") || result.startsWith("\u9519\u8BEF\uFF1A")) {
+              failStreak[name] = (failStreak[name] || 0) + 1;
+              if (failStreak[name] >= 3) {
+                stoppedReason = `\u5DE5\u5177\u300C${name}\u300D\u8FDE\u7EED ${failStreak[name]} \u6B21\u8C03\u7528\u5931\u8D25\uFF0C\u5DF2\u505C\u6B62\u8C03\u7528\u4EE5\u514D\u6D6A\u8D39\u8F6E\u6B21\u3002\u5176\u4F59\u529F\u80FD\u6B63\u5E38\u2014\u2014\u8BF7\u68C0\u67E5\u8BE5\u5DE5\u5177\u5B9E\u73B0\u6216\u914D\u7F6E\u540E\u91CD\u8BD5\u3002`;
+                break;
+              }
+            } else {
+              failStreak[name] = 0;
+            }
           }
+          if (stoppedReason)
+            break;
         }
-        if (iteration >= maxIterations) {
-          this.ui.onError("\u8FBE\u5230\u6700\u5927\u5DE5\u5177\u8C03\u7528\u6B21\u6570\u9650\u5236\uFF0C\u5DF2\u505C\u6B62\u5904\u7406\u3002");
+        if (stoppedReason) {
+          this.ui.onError(stoppedReason);
+        } else if (iteration >= maxIterations) {
+          this.ui.onError(
+            `\u5DF2\u8FBE\u5230\u6700\u5927\u5DE5\u5177\u8C03\u7528\u6B21\u6570\uFF08${maxIterations}\uFF09\u3002\u82E5\u6A21\u578B\u5728\u53CD\u590D\u8C03\u7528\u540C\u4E00\u5DE5\u5177\uFF0C\u8BF7\u68C0\u67E5\u8BE5\u5DE5\u5177\u6216\u8C03\u9AD8\u300C\u5DE5\u5177\u8C03\u7528\u6700\u5927\u8F6E\u6570\u300D\u8BBE\u7F6E\u3002`
+          );
+        }
+      }
+      /** 后台单次调用：抽取认知节点 → 沉积层；抽取稳定事实 → 意识层（机制⑦）。失败静默回退。 */
+      async extractAndRoute(userText, assistantText) {
+        if (this.sedimentManager)
+          this.sedimentManager.setProvider(this.provider);
+        const deposit = this.sedimentManager && this.settings.enableSediment;
+        if (!deposit) {
+          await this.extractStableFactsOnly(userText, assistantText);
+          return;
+        }
+        const chatText = `\u7528\u6237\u8BF4\uFF1A${userText}
+
+\u52A9\u624B\u56DE\u7B54\uFF1A${assistantText}`;
+        const result = await extractAndRoute(this.provider, chatText, this.settings);
+        if (!result) {
+          if (!_MessageHandler.sedimentWarnShown) {
+            _MessageHandler.sedimentWarnShown = true;
+            new import_obsidian11.Notice("\u6C89\u79EF\u5C42\uFF1A\u672C\u6B21\u672A\u80FD\u62BD\u53D6\u8BA4\u77E5\u8282\u70B9\uFF08LLM \u8C03\u7528\u5931\u8D25\uFF09\uFF0C\u4EC5\u5199\u5165\u65E5\u8BB0\u3002\u8BF7\u68C0\u67E5 LLM Provider \u662F\u5426\u6B63\u5E38\u3002");
+          }
+          console.warn("[sediment] \u8BA4\u77E5\u8282\u70B9\u62BD\u53D6\u5931\u8D25\uFF0C\u672C\u6B21\u5BF9\u8BDD\u672A\u6C89\u79EF\uFF08\u5DF2\u56DE\u9000\u4EC5\u5199\u65E5\u8BB0\uFF09");
+          await this.extractStableFactsOnly(userText, assistantText);
+          return;
+        }
+        await this.sedimentManager.depositTurn(userText, assistantText, result.cognitive_nodes);
+        if (this.memoryManager && this.settings.enableMemory && result.stable_facts.length > 0) {
+          await this.memoryManager.appendJournalEntry(result.stable_facts);
+        }
+        if (this.settings.enableSedimentAnalysis) {
+          void this.sedimentManager.runAnalysisPass();
+        }
+      }
+      /** 仅抽取稳定事实写入意识层日记（Phase 1 兼容回退路径） */
+      async extractStableFactsOnly(userText, assistantText) {
+        if (!this.memoryManager || !this.settings.enableMemory)
+          return;
+        const text = (assistantText || "").trim();
+        if (!text)
+          return;
+        try {
+          const sys = "\u4F60\u662F\u4E00\u4E2A\u8BB0\u5FC6\u62BD\u53D6\u5668\u3002\u8BF7\u4ECE\u4E0B\u9762\u7684\u5BF9\u8BDD\u4E2D\uFF0C\u62BD\u51FA\u503C\u5F97\u957F\u671F\u8BB0\u4F4F\u7684\u3001\u5173\u4E8E\u201C\u7528\u6237\u672C\u4EBA\u201D\u7684\u7A33\u5B9A\u4E8B\u5B9E\uFF08\u5982\u59D3\u540D\u3001\u804C\u4E1A\u3001\u504F\u597D\u3001\u91CD\u8981\u7EA6\u5B9A\u3001\u957F\u671F\u9879\u76EE\u3001\u5E38\u7528\u5DE5\u5177\u7B49\uFF09\u3002\n\u53EA\u8F93\u51FA\u8981\u70B9\uFF0C\u6BCF\u884C\u4E00\u6761\uFF0C\u4EE5 \u201C- \u201D \u5F00\u5934\u3002\u82E5\u6CA1\u6709\u503C\u5F97\u8BB0\u7684\u5185\u5BB9\uFF0C\u53EA\u8F93\u51FA\u4E00\u4E2A\u7A7A\u884C\u3002\u4E0D\u8981\u590D\u8FF0\u5BF9\u8BDD\u3001\u4E0D\u8981\u8F93\u51FA\u4EFB\u4F55\u89E3\u91CA\u6216\u524D\u540E\u7F00\u3002";
+          const resp = await this.provider.chat(
+            [
+              { role: "system", content: sys },
+              { role: "user", content: `\u7528\u6237\u8BF4\uFF1A${userText}
+
+\u52A9\u624B\u56DE\u7B54\uFF1A${assistantText}` }
+            ],
+            [],
+            () => {
+            }
+          );
+          const facts = (resp.content || "").split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- ") && l.length > 2).map((l) => l.slice(2).trim()).filter((l) => l.length > 0);
+          if (facts.length > 0) {
+            await this.memoryManager.appendJournalEntry(facts);
+          }
+        } catch (e) {
+          console.error("[MemoryManager] auto-extraction failed:", e);
         }
       }
       splitOverflow(content) {
@@ -1583,6 +1722,8 @@ var init_MessageHandler = __esm({
         }
       }
     };
+    _MessageHandler.sedimentWarnShown = false;
+    MessageHandler = _MessageHandler;
   }
 });
 
@@ -1618,9 +1759,9 @@ var init_i18n = __esm({
       zh: {
         statusReady: "\u51C6\u5907\u5C31\u7EEA",
         statusThinking: "\u601D\u8003\u4E2D...",
-        displayName: "LLM \u5BF9\u8BDD\u52A9\u624B",
-        ribbonTooltip: "LLM \u5BF9\u8BDD\u52A9\u624B",
-        welcomeHeader: "LLM \u52A9\u624B",
+        displayName: "Sedimind",
+        ribbonTooltip: "Sedimind",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>\u4F60\u597D\uFF01\u6211\u662F\u4F60\u7684 Obsidian \u7B14\u8BB0\u52A9\u624B\u3002\u4F60\u53EF\u4EE5\u8BA9\u6211\uFF1A</p>
 <ul>
   <li>\u521B\u5EFA\u7B14\u8BB0 \u2014 \u5E2E\u4F60\u5199\u65B0\u7B14\u8BB0</li>
@@ -1662,7 +1803,7 @@ var init_i18n = __esm({
         configError: "\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E {provider} \u7684 API \u5BC6\u94A5\u3002",
         errorPrefix: "\u53D1\u751F\u9519\u8BEF\uFF1A",
         maxIterationsError: "\u8FBE\u5230\u6700\u5927\u5DE5\u5177\u8C03\u7528\u6B21\u6570\u9650\u5236\uFF0C\u5DF2\u505C\u6B62\u5904\u7406\u3002",
-        cmdOpenChat: "\u6253\u5F00 LLM \u5BF9\u8BDD\u9762\u677F",
+        cmdOpenChat: "\u6253\u5F00 Sedimind",
         cmdNewChat: "\u65B0\u5EFA\u5BF9\u8BDD",
         cmdSummarize: "AI \u6458\u8981\u5F53\u524D\u7B14\u8BB0",
         cmdEditSelection: "\u5F15\u7528\u9009\u4E2D\u6587\u5B57\u5E76\u53D1\u9001\u4FEE\u6539\u6307\u4EE4",
@@ -1819,10 +1960,10 @@ var init_i18n = __esm({
         settingsEnableRecentConversationsDesc: "\u65B0\u5BF9\u8BDD\u65F6\u81EA\u52A8\u6CE8\u5165\u8FD1\u671F\u5BF9\u8BDD\u6458\u8981\u4F5C\u4E3A\u4E0A\u4E0B\u6587",
         settingsMaxRecentConversations: "\u8FD1\u671F\u5BF9\u8BDD\u6570\u91CF",
         settingsMaxRecentConversationsDesc: "\u4FDD\u7559\u7684\u8FD1\u671F\u5BF9\u8BDD\u6458\u8981\u6570\u91CF\u4E0A\u9650",
-        settingsEnableSavedMemory: "\u542F\u7528\u4FDD\u5B58\u8BB0\u5FC6",
-        settingsEnableSavedMemoryDesc: "\u5141\u8BB8 AI \u5728\u7528\u6237\u660E\u786E\u8981\u6C42\u65F6\u4FDD\u5B58\u8BB0\u5FC6\u4FE1\u606F",
+        settingsEnableSavedMemory: "\u542F\u7528\u8BB0\u5FC6\uFF08\u610F\u8BC6\u5C42\uFF09",
+        settingsEnableSavedMemoryDesc: "\u5F00\u542F\u540E\uFF0CAI \u4F1A\u81EA\u52A8\u4ECE\u5BF9\u8BDD\u4E2D\u84B8\u998F\u8981\u70B9\u5199\u5165\u65E5\u8BB0\uFF0C\u5E76\u901A\u8FC7 save_memory \u4FDD\u5B58\u957F\u671F\u4E8B\u5B9E\u5230 profile\u3002",
         settingsMemoryFolderName: "\u8BB0\u5FC6\u6587\u4EF6\u5939\u8DEF\u5F84",
-        settingsMemoryFolderNameDesc: "\u4FDD\u5B58\u8BB0\u5FC6\u6587\u4EF6\u7684\u6587\u4EF6\u5939\uFF08\u76F8\u5BF9\u4E8E Vault \u6839\u76EE\u5F55\uFF09",
+        settingsMemoryFolderNameDesc: "\u8BB0\u5FC6\u6839\u6587\u4EF6\u5939\uFF08\u76F8\u5BF9\u4E8E Vault \u6839\u76EE\u5F55\uFF09\uFF1B\u5176\u4E0B\u81EA\u52A8\u751F\u6210 journal/\uFF08\u6BCF\u65E5\u65E5\u8BB0\uFF09\u4E0E profile/\uFF08\u957F\u671F\u4E8B\u5B9E\uFF09\u3002",
         // ====== 消息操作按钮 ======
         actionFork: "\u5206\u53C9\u5BF9\u8BDD",
         actionEdit: "\u4FEE\u6539",
@@ -1881,9 +2022,9 @@ var init_i18n = __esm({
       "zh-TW": {
         statusReady: "\u6E96\u5099\u5C31\u7DD2",
         statusThinking: "\u601D\u8003\u4E2D...",
-        displayName: "LLM \u5C0D\u8A71\u52A9\u624B",
-        ribbonTooltip: "LLM \u5C0D\u8A71\u52A9\u624B",
-        welcomeHeader: "LLM \u52A9\u624B",
+        displayName: "Sedimind",
+        ribbonTooltip: "Sedimind",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>\u4F60\u597D\uFF01\u6211\u662F\u4F60\u7684 Obsidian \u7B46\u8A18\u52A9\u624B\u3002\u4F60\u53EF\u4EE5\u8B93\u6211\uFF1A</p>
 <ul>
   <li>\u5EFA\u7ACB\u7B46\u8A18 \u2014 \u5E6B\u4F60\u5BEB\u65B0\u7B46\u8A18</li>
@@ -1925,7 +2066,7 @@ var init_i18n = __esm({
         configError: "\u8ACB\u5148\u5728\u8A2D\u5B9A\u4E2D\u914D\u7F6E {provider} \u7684 API \u91D1\u9470\u3002",
         errorPrefix: "\u767C\u751F\u932F\u8AA4\uFF1A",
         maxIterationsError: "\u9054\u5230\u6700\u5927\u5DE5\u5177\u8ABF\u7528\u6B21\u6578\u9650\u5236\uFF0C\u5DF2\u505C\u6B62\u8655\u7406\u3002",
-        cmdOpenChat: "\u958B\u555F LLM \u5C0D\u8A71\u9762\u677F",
+        cmdOpenChat: "\u958B\u555F Sedimind",
         cmdNewChat: "\u65B0\u5EFA\u5C0D\u8A71",
         cmdSummarize: "AI \u6458\u8981\u7576\u524D\u7B46\u8A18",
         cmdEditSelection: "\u5F15\u7528\u9078\u53D6\u6587\u5B57\u4E26\u767C\u9001\u4FEE\u6539\u6307\u4EE4",
@@ -2111,7 +2252,7 @@ var init_i18n = __esm({
         statusThinking: "Thinking...",
         displayName: "Sedimind",
         ribbonTooltip: "Sedimind",
-        welcomeHeader: "LLM Assistant",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>Hello! I'm your Obsidian note assistant. I can help you:</p>
 <ul>
   <li>Create notes \u2014 write new notes for you</li>
@@ -2310,10 +2451,10 @@ var init_i18n = __esm({
         settingsEnableRecentConversationsDesc: "Automatically inject recent conversation summaries as context in new conversations",
         settingsMaxRecentConversations: "Recent Conversation Count",
         settingsMaxRecentConversationsDesc: "Maximum number of recent conversation summaries to retain",
-        settingsEnableSavedMemory: "Enable Saved Memory",
-        settingsEnableSavedMemoryDesc: "Allow AI to save memory when user explicitly requests it",
+        settingsEnableSavedMemory: "Enable Memory (conscious layer)",
+        settingsEnableSavedMemoryDesc: "When enabled, AI auto-distills key points from chats into a journal and saves long-term facts to profile via save_memory.",
         settingsMemoryFolderName: "Memory Folder Path",
-        settingsMemoryFolderNameDesc: "Folder for saving memory files (relative to Vault root)",
+        settingsMemoryFolderNameDesc: "Memory root folder (relative to Vault root); auto-contains journal/ (daily) and profile/ (long-term facts).",
         // ====== Message Action Buttons ======
         actionFork: "Fork Conversation",
         actionEdit: "Edit",
@@ -2372,9 +2513,9 @@ var init_i18n = __esm({
       ja: {
         statusReady: "\u6E96\u5099\u5B8C\u4E86",
         statusThinking: "\u8003\u3048\u4E2D...",
-        displayName: "LLM \u30C1\u30E3\u30C3\u30C8\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8",
-        ribbonTooltip: "LLM \u30C1\u30E3\u30C3\u30C8\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8",
-        welcomeHeader: "LLM \u30A2\u30B7\u30B9\u30BF\u30F3\u30C8",
+        displayName: "Sedimind",
+        ribbonTooltip: "Sedimind",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>\u3053\u3093\u306B\u3061\u306F\uFF01Obsidian\u30CE\u30FC\u30C8\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8\u3067\u3059\u3002\u4EE5\u4E0B\u306E\u3053\u3068\u304C\u3067\u304D\u307E\u3059\uFF1A</p>
 <ul>
   <li>\u30CE\u30FC\u30C8\u4F5C\u6210 \u2014 \u65B0\u3057\u3044\u30CE\u30FC\u30C8\u3092\u4F5C\u6210</li>
@@ -2409,7 +2550,7 @@ var init_i18n = __esm({
         configError: "\u8A2D\u5B9A\u3067{provider}\u306EAPI\u30AD\u30FC\u3092\u8A2D\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
         errorPrefix: "\u30A8\u30E9\u30FC\uFF1A",
         maxIterationsError: "\u30C4\u30FC\u30EB\u547C\u3073\u51FA\u3057\u306E\u6700\u5927\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F\u3002\u51E6\u7406\u3092\u505C\u6B62\u3057\u307E\u3059\u3002",
-        cmdOpenChat: "LLM\u30C1\u30E3\u30C3\u30C8\u3092\u958B\u304F",
+        cmdOpenChat: "Sedimind\u3092\u958B\u304F",
         cmdNewChat: "\u65B0\u3057\u3044\u4F1A\u8A71",
         cmdSummarize: "AI\u8981\u7D04",
         cmdEditSelection: "\u9078\u629E\u30C6\u30AD\u30B9\u30C8\u3092\u53C2\u7167\u3057\u3066\u7DE8\u96C6\u6307\u793A\u3092\u9001\u4FE1",
@@ -2566,9 +2707,9 @@ var init_i18n = __esm({
       ko: {
         statusReady: "\uC900\uBE44 \uC644\uB8CC",
         statusThinking: "\uC0DD\uAC01 \uC911...",
-        displayName: "LLM \uCC44\uD305 \uB3C4\uC6B0\uBBF8",
-        ribbonTooltip: "LLM \uCC44\uD305 \uB3C4\uC6B0\uBBF8",
-        welcomeHeader: "LLM \uB3C4\uC6B0\uBBF8",
+        displayName: "Sedimind",
+        ribbonTooltip: "Sedimind",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>\uC548\uB155\uD558\uC138\uC694! Obsidian \uB178\uD2B8 \uB3C4\uC6B0\uBBF8\uC785\uB2C8\uB2E4. \uB2E4\uC74C\uC744 \uB3C4\uC640\uB4DC\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4:</p>
 <ul>
   <li>\uB178\uD2B8 \uC791\uC131 \u2014 \uC0C8 \uB178\uD2B8 \uC791\uC131</li>
@@ -2603,7 +2744,7 @@ var init_i18n = __esm({
         configError: "\uC124\uC815\uC5D0\uC11C {provider} API \uD0A4\uB97C \uBA3C\uC800 \uAD6C\uC131\uD558\uC138\uC694.",
         errorPrefix: "\uC624\uB958: ",
         maxIterationsError: "\uCD5C\uB300 \uB3C4\uAD6C \uD638\uCD9C \uD69F\uC218\uC5D0 \uB3C4\uB2EC\uD588\uC2B5\uB2C8\uB2E4. \uCC98\uB9AC\uAC00 \uC911\uC9C0\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
-        cmdOpenChat: "LLM \uCC44\uD305 \uC5F4\uAE30",
+        cmdOpenChat: "Sedimind \uC5F4\uAE30",
         cmdNewChat: "\uC0C8 \uB300\uD654",
         cmdSummarize: "AI \uC694\uC57D",
         cmdEditSelection: "\uC120\uD0DD \uD14D\uC2A4\uD2B8 \uCC38\uC870 \uBC0F \uD3B8\uC9D1 \uBA85\uB839 \uC804\uC1A1",
@@ -2762,7 +2903,7 @@ var init_i18n = __esm({
         statusThinking: "Denkt nach...",
         displayName: "Sedimind",
         ribbonTooltip: "Sedimind",
-        welcomeHeader: "LLM Assistent",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>Hallo! Ich bin dein Obsidian-Notizassistent. Ich kann dir helfen:</p>
 <ul>
   <li>Notizen erstellen \u2014 neue Notizen schreiben</li>
@@ -2797,7 +2938,7 @@ var init_i18n = __esm({
         configError: "Bitte konfiguriere zuerst den {provider} API-Schl\xFCssel in den Einstellungen.",
         errorPrefix: "Fehler: ",
         maxIterationsError: "Maximale Anzahl an Werkzeugaufrufen erreicht, Verarbeitung gestoppt.",
-        cmdOpenChat: "LLM-Chat \xF6ffnen",
+        cmdOpenChat: "Sedimind \xF6ffnen",
         cmdNewChat: "Neuer Chat",
         cmdSummarize: "KI-Zusammenfassung",
         cmdEditSelection: "Auswahl referenzieren und Bearbeitungsbefehl senden",
@@ -2954,9 +3095,9 @@ var init_i18n = __esm({
       fr: {
         statusReady: "Pr\xEAt",
         statusThinking: "R\xE9flexion...",
-        displayName: "Assistant Chat LLM",
-        ribbonTooltip: "Assistant Chat LLM",
-        welcomeHeader: "Assistant LLM",
+        displayName: "Sedimind",
+        ribbonTooltip: "Sedimind",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>Bonjour ! Je suis votre assistant de notes Obsidian. Je peux vous aider \xE0 :</p>
 <ul>
   <li>Cr\xE9er des notes \u2014 r\xE9diger de nouvelles notes</li>
@@ -2991,7 +3132,7 @@ var init_i18n = __esm({
         configError: "Veuillez d'abord configurer la cl\xE9 API {provider} dans les param\xE8tres.",
         errorPrefix: "Erreur : ",
         maxIterationsError: "Nombre maximal d'appels d'outils atteint, traitement arr\xEAt\xE9.",
-        cmdOpenChat: "Ouvrir le chat LLM",
+        cmdOpenChat: "Ouvrir Sedimind",
         cmdNewChat: "Nouveau chat",
         cmdSummarize: "R\xE9sum\xE9 IA",
         cmdEditSelection: "R\xE9f\xE9rencer la s\xE9lection et envoyer la commande",
@@ -3148,9 +3289,9 @@ var init_i18n = __esm({
       es: {
         statusReady: "Listo",
         statusThinking: "Pensando...",
-        displayName: "Asistente de Chat LLM",
-        ribbonTooltip: "Asistente de Chat LLM",
-        welcomeHeader: "Asistente LLM",
+        displayName: "Sedimind",
+        ribbonTooltip: "Sedimind",
+        welcomeHeader: "Sedimind",
         welcomeBody: `<p>\xA1Hola! Soy tu asistente de notas de Obsidian. Puedo ayudarte a:</p>
 <ul>
   <li>Crear notas \u2014 escribir nuevas notas</li>
@@ -3185,7 +3326,7 @@ var init_i18n = __esm({
         configError: "Por favor configura primero la clave API de {provider} en los ajustes.",
         errorPrefix: "Error: ",
         maxIterationsError: "Se alcanz\xF3 el n\xFAmero m\xE1ximo de llamadas a herramientas, procesamiento detenido.",
-        cmdOpenChat: "Abrir chat LLM",
+        cmdOpenChat: "Abrir Sedimind",
         cmdNewChat: "Nuevo chat",
         cmdSummarize: "Resumen IA",
         cmdEditSelection: "Referenciar selecci\xF3n y enviar comando de edici\xF3n",
@@ -4952,16 +5093,29 @@ var DEFAULT_SETTINGS = {
   maxTokens: 4096,
   temperature: 0.7,
   maxConversationHistory: 50,
+  maxToolIterations: 15,
   enable1MContext: false,
   mcpServers: [],
-  enableRecentConversations: true,
-  maxRecentConversations: 5,
-  enableSavedMemory: true,
+  enableMemory: true,
   memoryFolderName: "llm-chat/memory",
-  // 沉积层默认关闭 —— 它是实验性的，且和现有记忆系统是两条路
-  enableSediment: false,
+  memoryJournalDays: 7,
+  forceMemoryRecall: true,
+  memoryProfileMaxAgeDays: 0,
+  // 沉积层默认开启（核心功能；如需退回实验态可在设置关闭）
+  enableSediment: true,
   // 每日简报默认开启（仅当总开关开启时生效）
   enableSedimentBriefing: true,
+  // Phase 2 深度分析默认关闭（隐私与性能默认最大）
+  enableSedimentAnalysis: false,
+  sedimentMetamorph: { n: 3, tDays: 2, r: 1 },
+  sedimentCaps: { metamorphPerDay: 10, faultPerDay: 20 },
+  sedimentInjection: { maxBlocks: 6, maxTokens: 1500, maxCaptureInTokens: 2e3 },
+  sedimentDecay: { dailyFactor: 0.9 },
+  sedimentWeight: { survival: 0.5, novelty: 0.3, explore: 0.2, contrast: 0.3 },
+  // Phase 3 主动进化
+  enableSedimentWormhole: false,
+  sedimentCompactionDays: 30,
+  sedimentCompactionMinAgeDays: 90,
   sedimentFolderName: ".sediment",
   showCopyNotice: true,
   enableSelectionToolbar: true,
@@ -6045,21 +6199,9 @@ var SettingsRenderer = class {
   renderMemoryTab(container) {
     container.createEl("h3", { text: this.str("settingsMemoryTitle") });
     container.createEl("p", { text: this.str("settingsMemoryDesc"), cls: "setting-item-description" });
-    new import_obsidian14.Setting(container).setName(this.str("settingsEnableRecentConversations")).setDesc(this.str("settingsEnableRecentConversationsDesc")).addToggle(
-      (t2) => t2.setValue(this.settings.enableRecentConversations).onChange(async (v) => {
-        this.settings.enableRecentConversations = v;
-        await this.save();
-      })
-    );
-    new import_obsidian14.Setting(container).setName(this.str("settingsMaxRecentConversations")).setDesc(this.str("settingsMaxRecentConversationsDesc")).addSlider(
-      (s) => s.setLimits(1, 20, 1).setValue(this.settings.maxRecentConversations).setDynamicTooltip().onChange(async (v) => {
-        this.settings.maxRecentConversations = v;
-        await this.save();
-      })
-    );
     new import_obsidian14.Setting(container).setName(this.str("settingsEnableSavedMemory")).setDesc(this.str("settingsEnableSavedMemoryDesc")).addToggle(
-      (t2) => t2.setValue(this.settings.enableSavedMemory).onChange(async (v) => {
-        this.settings.enableSavedMemory = v;
+      (t2) => t2.setValue(this.settings.enableMemory).onChange(async (v) => {
+        this.settings.enableMemory = v;
         await this.save();
       })
     );
@@ -9109,6 +9251,12 @@ var LLMChatSettingsTab = class extends import_obsidian17.PluginSettingTab {
       text.inputEl.style.width = "100%";
       sysText = text;
     });
+    new import_obsidian17.Setting(container).setName("\u5DE5\u5177\u8C03\u7528\u6700\u5927\u8F6E\u6570").setDesc("\u6A21\u578B\u5355\u6B21\u56DE\u7B54\u4E2D\u6700\u591A\u8FDE\u7EED\u8C03\u7528\u5DE5\u5177\u7684\u6B21\u6570\u3002\u8FC7\u4F4E\u6613\u63D0\u524D\u505C\u6B62\uFF0C\u8FC7\u9AD8\u53EF\u80FD\u7A7A\u8F6C\u6D6A\u8D39\u8F6E\u6B21\u3002\u9ED8\u8BA4 15\u3002\u6539\u52A8\u5373\u65F6\u751F\u6548\u3002").addSlider(
+      (s) => s.setLimits(5, 50, 1).setValue(this.settings.maxToolIterations).setDynamicTooltip().onChange(async (v) => {
+        this.settings.maxToolIterations = v;
+        await this.save();
+      })
+    );
     container.createEl("h3", { text: "\u5212\u8BCD\u5DE5\u5177\u680F" });
     new import_obsidian17.Setting(container).setName("\u542F\u7528\u5212\u8BCD\u5DE5\u5177\u680F").setDesc("\u5728\u7B14\u8BB0\u4E2D\u9009\u4E2D\u6587\u5B57\u65F6\uFF0C\u5728\u9009\u533A\u9644\u8FD1\u663E\u793A\u6D6E\u52A8\u5DE5\u5177\u680F\u3002\u5173\u95ED\u540E\u5F7B\u5E95\u4E0D\u663E\u793A\u3002").addToggle(
       (t2) => t2.setValue(this.settings.enableSelectionToolbar).onChange(async (v) => {
@@ -9475,27 +9623,28 @@ var LLMChatSettingsTab = class extends import_obsidian17.PluginSettingTab {
   renderMemoryTab(container) {
     container.createEl("h3", { text: this.str("settingsMemoryTitle") });
     container.createEl("p", { text: this.str("settingsMemoryDesc"), cls: "setting-item-description" });
-    new import_obsidian17.Setting(container).setName(this.str("settingsEnableRecentConversations")).setDesc(this.str("settingsEnableRecentConversationsDesc")).addToggle(
-      (t2) => t2.setValue(this.settings.enableRecentConversations).onChange(async (v) => {
-        this.settings.enableRecentConversations = v;
-        await this.save();
-      })
-    );
-    new import_obsidian17.Setting(container).setName(this.str("settingsMaxRecentConversations")).setDesc(this.str("settingsMaxRecentConversationsDesc")).addSlider(
-      (s) => s.setLimits(1, 20, 1).setValue(this.settings.maxRecentConversations).setDynamicTooltip().onChange(async (v) => {
-        this.settings.maxRecentConversations = v;
-        await this.save();
-      })
-    );
     new import_obsidian17.Setting(container).setName(this.str("settingsEnableSavedMemory")).setDesc(this.str("settingsEnableSavedMemoryDesc")).addToggle(
-      (t2) => t2.setValue(this.settings.enableSavedMemory).onChange(async (v) => {
-        this.settings.enableSavedMemory = v;
+      (t2) => t2.setValue(this.settings.enableMemory).onChange(async (v) => {
+        this.settings.enableMemory = v;
         await this.save();
       })
     );
     new import_obsidian17.Setting(container).setName(this.str("settingsMemoryFolderName")).setDesc(this.str("settingsMemoryFolderNameDesc")).addText(
       (t2) => t2.setPlaceholder("llm-chat/memory").setValue(this.settings.memoryFolderName).onChange(async (v) => {
         this.settings.memoryFolderName = v;
+        await this.save();
+      })
+    );
+    new import_obsidian17.Setting(container).setName("\u8BB0\u5FC6\u53EC\u56DE\u534F\u8BAE\uFF08\u5B9E\u65F6\u6CE8\u5165\uFF09").setDesc("\u5F00\u542F\u540E\uFF0C\u6CE8\u5165\u7528\u6237\u8BB0\u5FC6\u524D\u5F3A\u5236\u9644\u5E26\u300C\u56DE\u7B54\u524D\u5FC5\u987B\u5148\u53C2\u8003\u7528\u6237\u957F\u671F\u8BB0\u5FC6\u300D\u6307\u4EE4\uFF0C\u907F\u514D AI \u51ED\u7A7A\u675C\u64B0\u7528\u6237\u60C5\u51B5\uFF08\u501F MemPalace recall-protocol\uFF09\u3002\u9ED8\u8BA4\u5F00\u542F\uFF0C\u6539\u52A8\u5373\u65F6\u751F\u6548\u3002").addToggle(
+      (t2) => t2.setValue(this.settings.forceMemoryRecall).onChange(async (v) => {
+        this.settings.forceMemoryRecall = v;
+        await this.save();
+      })
+    );
+    new import_obsidian17.Setting(container).setName("\u753B\u50CF\u81EA\u52A8\u5931\u6548\u5929\u6570").setDesc("\u8D85\u8FC7\u8BE5\u5929\u6570\u7684 profile \u4E0D\u518D\u6CE8\u5165\u4E0A\u4E0B\u6587\uFF08\u78C1\u76D8\u4ECD\u4FDD\u7559\uFF0C\u53EF\u5728\u6587\u4EF6 frontmatter \u52A0 active_until \u5355\u72EC\u63A7\u5236\uFF0C\u6216\u7528\u300C\u4F7F\u5F53\u524D\u753B\u50CF\u8BB0\u5FC6\u5931\u6548\u300D\u547D\u4EE4\u624B\u52A8\u4F5C\u5E9F\uFF09\u30020=\u6C38\u4E0D\u81EA\u52A8\u5931\u6548\u3002\u6539\u52A8\u5373\u65F6\u751F\u6548\u3002").addText(
+      (t2) => t2.setPlaceholder("0").setValue(String(this.settings.memoryProfileMaxAgeDays)).onChange(async (v) => {
+        const n = parseInt(v, 10);
+        this.settings.memoryProfileMaxAgeDays = isNaN(n) || n < 0 ? 0 : n;
         await this.save();
       })
     );
@@ -9516,10 +9665,45 @@ var LLMChatSettingsTab = class extends import_obsidian17.PluginSettingTab {
         await this.save();
       })
     );
+    new import_obsidian17.Setting(container).setName("\u6C89\u79EF\u5C42\u6DF1\u5EA6\u5206\u6790\uFF08Phase 2\uFF09").setDesc("\u5173\u95ED=\u4EC5\u88AB\u52A8\u6C89\u79EF\uFF08Phase 1 \u884C\u4E3A\uFF09\u3002\u5F00\u542F=\u989D\u5916\u8FD0\u884C\u53D8\u8D28 / \u65AD\u5C42 / \u77FF\u8109 / \u53CD\u5DEE\u6CE8\u5165 / \u6BCF\u65E5\u8870\u51CF\uFF08Phase 2\uFF09\u3002\u9ED8\u8BA4\u5173\u95ED\uFF08\u9690\u79C1\u4E0E\u6027\u80FD\u9ED8\u8BA4\u6700\u5927\uFF09\u3002").addToggle(
+      (t2) => t2.setValue(this.settings.enableSedimentAnalysis).onChange(async (v) => {
+        var _a, _b, _c, _d;
+        this.settings.enableSedimentAnalysis = v;
+        await this.save();
+        (_b = (_a = this.sedimentManager) == null ? void 0 : _a.setAnalysisEnabled) == null ? void 0 : _b.call(_a, v);
+        (_d = (_c = this.sedimentManager) == null ? void 0 : _c.updateSettings) == null ? void 0 : _d.call(_c, this.settings);
+        this.display();
+      })
+    );
     new import_obsidian17.Setting(container).setName("\u6C89\u79EF\u5C42\u6587\u4EF6\u5939").setDesc("\u6C89\u79EF\u7269\u5B58\u653E\u6839\u76EE\u5F55\uFF08\u76F8\u5BF9\u4E8E vault \u6839\u76EE\u5F55\uFF09\u3002\u9ED8\u8BA4 .sediment\u3002").addText(
       (t2) => t2.setPlaceholder(".sediment").setValue(this.settings.sedimentFolderName).onChange(async (v) => {
         this.settings.sedimentFolderName = v;
         await this.save();
+      })
+    );
+    const analysisOn = this.settings.enableSedimentAnalysis;
+    new import_obsidian17.Setting(container).setName("\u5B9E\u65F6\u866B\u6D1E\uFF08Phase 3\uFF09").setDesc("\u5F00\u542F\u540E\uFF0C\u7F16\u8F91 vault \u7B14\u8BB0\u65F6\u540E\u53F0\u8BED\u4E49\u6BD4\u5BF9\u6C89\u79EF\u5C42\uFF0C\u5F39\u7A97\u63D0\u793A\u300C\u77DB\u76FE/\u547C\u5E94/\u6F14\u5316\u300D\u5BF9\u7167\u3002\u9ED8\u8BA4\u5173\u95ED\uFF08\u6BCF\u6B21\u7F16\u8F91\u89E6\u53D1 LLM\uFF0C\u8F83\u8D39 token\uFF09\u3002\u9700\u5148\u5F00\u542F\u300C\u6C89\u79EF\u5C42\u6DF1\u5EA6\u5206\u6790\u300D\u3002").addToggle(
+      (t2) => t2.setValue(this.settings.enableSedimentWormhole).setDisabled(!analysisOn).onChange(async (v) => {
+        this.settings.enableSedimentWormhole = v;
+        await this.save();
+      })
+    );
+    new import_obsidian17.Setting(container).setName("\u5468\u671F\u6027\u538B\u5B9E\u95F4\u9694\uFF08\u5929\uFF09").setDesc("\u6BCF\u9694 N \u5929\u81EA\u52A8\u628A\u8DB3\u591F\u8001\u7684\u5316\u77F3\u538B\u5B9E\u6210\u72EC\u7ACB\u6D3E\u751F\u6458\u8981\u3002\u5728\u6DF1\u5EA6\u5206\u6790 pass \u4E2D\u81EA\u52A8\u8FD0\u884C\u3002").addSlider(
+      (s) => s.setLimits(7, 90, 1).setValue(this.settings.sedimentCompactionDays).setDynamicTooltip().onChange(async (v) => {
+        this.settings.sedimentCompactionDays = v;
+        await this.save();
+      })
+    );
+    new import_obsidian17.Setting(container).setName("\u538B\u5B9E\u6700\u65E7\u5316\u77F3\u5E74\u9F84\uFF08\u5929\uFF09").setDesc("\u53EA\u6709\u65E9\u4E8E M \u5929\u7684\u5316\u77F3\u624D\u4F1A\u53C2\u4E0E\u538B\u5B9E\uFF08\u9ED8\u8BA4 90 \u5929\uFF09\u3002").addSlider(
+      (s) => s.setLimits(30, 365, 1).setValue(this.settings.sedimentCompactionMinAgeDays).setDynamicTooltip().onChange(async (v) => {
+        this.settings.sedimentCompactionMinAgeDays = v;
+        await this.save();
+      })
+    );
+    new import_obsidian17.Setting(container).setName("\u8BA4\u77E5\u6742\u4EA4\uFF08Phase 3\uFF09").setDesc("\u547D\u4EE4\u300C\u5F3A\u5236\u7075\u611F\u5173\u8054\u300D\uFF1A\u53D6 >30 \u5929\u7684\u65E7\u5316\u77F3\u968F\u673A 2~3 \u6761\u505A\u53D7\u63A7\u7075\u611F\u6742\u4EA4\uFF0C\u9ED8\u8BA4\u4F4E\u6743\uFF1B\u9700\u5728\u300C\u786E\u8BA4\u7075\u611F\u5347\u6743\u300D\u5F39\u7A97\u6807\u300C\u6709\u542F\u53D1\u300D\u624D\u5347\u6743\uFF0C\u9632\u81EA\u6211\u6C61\u67D3\u3002").addButton(
+      (b) => b.setButtonText("\u5F3A\u5236\u7075\u611F\u5173\u8054").onClick(async () => {
+        var _a, _b;
+        await ((_b = (_a = this.sedimentManager) == null ? void 0 : _a.runHybridizationPass) == null ? void 0 : _b.call(_a));
       })
     );
   }
@@ -10804,135 +10988,239 @@ var MemoryManager4 = class {
     this.app = app;
     this.settings = settings;
   }
-  // ====== 近期对话记忆 ======
-  /** 保存对话摘要到近期记忆 */
-  async saveRecentConversation(id, title, summary) {
-    if (!this.settings.enableRecentConversations)
-      return;
-    const recent = this.loadRecentConversations();
-    const existing = recent.findIndex((r) => r.id === id);
-    const record = {
-      id,
-      title,
-      summary,
-      timestamp: Date.now()
-    };
-    if (existing >= 0) {
-      recent[existing] = record;
-    } else {
-      recent.unshift(record);
+  // ====== 路径 ======
+  root() {
+    return (0, import_obsidian20.normalizePath)(this.settings.memoryFolderName || "llm-chat/memory");
+  }
+  journalFolder() {
+    return (0, import_obsidian20.normalizePath)(`${this.root()}/journal`);
+  }
+  profileFolder() {
+    return (0, import_obsidian20.normalizePath)(`${this.root()}/profile`);
+  }
+  // ====== 加载（注入 system prompt） ======
+  /** 读取全部记忆上下文，拼为 system prompt 片段 */
+  async getMemoryContext() {
+    if (!this.settings.enableMemory)
+      return "";
+    const parts = [];
+    const profile = await this.loadProfile();
+    if (profile) {
+      parts.push(`\u7528\u6237\u957F\u671F\u8BB0\u5FC6\uFF08\u4F60\u662F\u8C01 / \u7A33\u5B9A\u4E8B\u5B9E\uFF09\uFF1A
+${profile}`);
     }
-    const max = this.settings.maxRecentConversations || 5;
-    const trimmed = recent.slice(0, max);
-    this.saveRecentConversations(trimmed);
-  }
-  /** 获取近期对话摘要文本（用于注入 system prompt） */
-  getRecentConversationsContext() {
-    if (!this.settings.enableRecentConversations)
+    const journal = await this.loadRecentJournal(this.settings.memoryJournalDays || 7);
+    if (journal) {
+      parts.push(`\u8FD1\u671F\u65E5\u8BB0\uFF08\u6309\u5929\u8BB0\u5F55\u7684\u91CD\u8981\u4FE1\u606F\uFF0C\u8D8A\u65B0\u8D8A\u76F8\u5173\uFF09\uFF1A
+${journal}`);
+    }
+    if (!parts.length)
       return "";
-    const recent = this.loadRecentConversations();
-    if (recent.length === 0)
-      return "";
-    const lines = recent.map(
-      (r) => `- [${r.title}] ${r.summary} (${new Date(r.timestamp).toLocaleDateString()})`
-    );
-    return `
+    const prefix = this.settings.forceMemoryRecall ? "\n\n\u3010\u8BB0\u5FC6\u53EC\u56DE\u534F\u8BAE\u3011\u56DE\u7B54\u524D\u5FC5\u987B\u5148\u53C2\u8003\u4E0A\u65B9\u7528\u6237\u957F\u671F\u8BB0\u5FC6\u4E0E\u8FD1\u671F\u65E5\u8BB0\uFF0C\u7981\u6B62\u51ED\u7A7A\u675C\u64B0\u7528\u6237\u7684\u8EAB\u4EFD\u3001\u504F\u597D\u4E0E\u5386\u53F2\u60C5\u51B5\u3002" : "";
+    return `${prefix}
 
-\u8FD1\u671F\u5BF9\u8BDD\u5386\u53F2\u6458\u8981\uFF1A
-${lines.join("\n")}`;
+${parts.join("\n\n")}`;
   }
-  // ====== 保存记忆 ======
-  /** 保存一条用户明确要求记住的信息 */
-  async saveMemory(content) {
-    if (!this.settings.enableSavedMemory)
-      return;
-    const folderPath = (0, import_obsidian20.normalizePath)(this.settings.memoryFolderName);
+  async loadProfile() {
     const vault = this.app.vault;
-    const folder = vault.getAbstractFileByPath(folderPath);
-    if (!folder) {
-      await vault.createFolder(folderPath);
-    }
-    const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    const shortContent = content.slice(0, 40).replace(/[\\/:*?"<>|]/g, "_");
-    const fileName = `${timestamp}_${shortContent}.md`;
-    const filePath = (0, import_obsidian20.normalizePath)(`${folderPath}/${fileName}`);
-    await vault.create(filePath, `---
-created: ${(/* @__PURE__ */ new Date()).toISOString()}
-type: memory
----
-
-${content}
-`);
-    console.log(`[MemoryManager] Saved memory: ${filePath}`);
-  }
-  /** 获取所有保存记忆的文本（用于注入 system prompt） */
-  async getSavedMemoryContext() {
-    if (!this.settings.enableSavedMemory)
-      return "";
-    const folderPath = (0, import_obsidian20.normalizePath)(this.settings.memoryFolderName);
-    const vault = this.app.vault;
-    const folder = vault.getAbstractFileByPath(folderPath);
-    if (!folder)
-      return "";
-    const files = vault.getMarkdownFiles().filter((f) => f.path.startsWith(folderPath));
-    if (files.length === 0)
-      return "";
-    const memories = [];
-    for (const file of files.slice(0, 20)) {
-      try {
-        const content = await vault.read(file);
-        memories.push(`- ${content.trim()}`);
-      } catch (e) {
-      }
-    }
-    if (memories.length === 0)
-      return "";
-    return `
-
-\u7528\u6237\u4FDD\u5B58\u7684\u8BB0\u5FC6\uFF1A
-${memories.join("\n")}`;
-  }
-  // ====== 对话总结 ======
-  /** 根据对话历史生成摘要（简单的关键词提取法，也可由 LLM 生成） */
-  generateSummary(messages) {
-    const userMessages = messages.filter((m) => m.role === "user");
-    if (userMessages.length === 0)
-      return "\u7A7A\u5BF9\u8BDD";
-    const topics = userMessages.slice(0, 3).map((m) => m.content.slice(0, 50)).join("\uFF1B");
-    return topics;
-  }
-  // ====== 内部存储 ======
-  getMemoryDataPath() {
-    return (0, import_obsidian20.normalizePath)(".obsidian/llm-chat/recent-conversations.json");
-  }
-  loadRecentConversations() {
     try {
-      const file = this.app.vault.getAbstractFileByPath(this.getMemoryDataPath());
-      if (file instanceof import_obsidian20.TFile) {
-        return [];
+      const profileFolder = this.profileFolder();
+      const journalFolder = this.journalFolder();
+      const rootFolder = this.root();
+      const files = vault.getMarkdownFiles().filter((f) => {
+        if (f.path.startsWith(profileFolder + "/"))
+          return true;
+        if (f.path.startsWith(rootFolder + "/") && !f.path.startsWith(profileFolder + "/") && !f.path.startsWith(journalFolder + "/")) {
+          return true;
+        }
+        return false;
+      });
+      if (files.length === 0)
+        return "";
+      const entries = [];
+      for (const file of files.slice(0, 50)) {
+        try {
+          const content = await vault.read(file);
+          const fm = this.parseFrontmatter(content);
+          if (this.isProfileExpired(fm))
+            continue;
+          const body = this.stripFrontmatter(content).trim();
+          if (body)
+            entries.push(`- ${body}`);
+        } catch (e) {
+        }
       }
-      return [];
+      return entries.join("\n");
     } catch (e) {
-      return [];
+      return "";
     }
   }
-  async saveRecentConversations(conversations) {
+  /** 判断一条画像 frontmatter 是否已失效（命中后不再注入上下文，但磁盘保留） */
+  isProfileExpired(fm) {
+    if (fm["expired"] === "true" || fm["expired"] === true)
+      return true;
+    if (fm["active_until"]) {
+      const au = Date.parse(fm["active_until"]);
+      if (!isNaN(au) && au < Date.now())
+        return true;
+    }
+    const maxAge = this.settings.memoryProfileMaxAgeDays;
+    if (maxAge > 0 && fm["updated"]) {
+      const up = Date.parse(fm["updated"]);
+      if (!isNaN(up) && Date.now() - up > maxAge * 864e5)
+        return true;
+    }
+    return false;
+  }
+  /** 将当前文件标记为已失效（手动作废画像记忆：不再注入上下文，但磁盘保留） */
+  async markExpired(filePath) {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof import_obsidian20.TFile))
+      return false;
     try {
-      const path = this.getMemoryDataPath();
-      const folderPath = (0, import_obsidian20.normalizePath)(".obsidian/llm-chat");
-      const folder = this.app.vault.getAbstractFileByPath(folderPath);
-      if (!folder) {
-        await this.app.vault.createFolder(folderPath);
+      const content = await this.app.vault.read(file);
+      const fm = this.parseFrontmatter(content);
+      fm["expired"] = "true";
+      fm["active_until"] = "2000-01-01";
+      const body = this.stripFrontmatter(content);
+      await this.app.vault.modify(file, this.serializeFrontmatter(fm) + body);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  async loadRecentJournal(days) {
+    const vault = this.app.vault;
+    try {
+      const folder = this.journalFolder();
+      const files = vault.getMarkdownFiles().filter((f) => f.path.startsWith(folder + "/"));
+      if (files.length === 0)
+        return "";
+      const today = /* @__PURE__ */ new Date();
+      const wanted = /* @__PURE__ */ new Set();
+      for (let i = 0; i < days; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        wanted.add(this.dateStr(d));
       }
-      const content = JSON.stringify(conversations, null, 2);
-      const existing = this.app.vault.getAbstractFileByPath(path);
-      if (existing instanceof import_obsidian20.TFile) {
-        await this.app.vault.modify(existing, content);
-      } else {
-        await this.app.vault.create(path, content);
+      const entries = [];
+      for (const file of files) {
+        const name = file.basename;
+        if (wanted.has(name)) {
+          try {
+            const content = await vault.read(file);
+            entries.push(`\u3010${name}\u3011
+${content.trim()}`);
+          } catch (e) {
+          }
+        }
       }
-    } catch (error) {
-      console.error("[MemoryManager] Failed to save conversations:", error);
+      entries.reverse();
+      return entries.join("\n\n");
+    } catch (e) {
+      return "";
+    }
+  }
+  // ====== 写入：显式存档（save_memory 工具） ======
+  /** 显式保存一条记忆（用户/AI 调用 save_memory 时） */
+  async saveMemory(content) {
+    if (!this.settings.enableMemory)
+      return;
+    const body = content.trim();
+    if (!body)
+      return;
+    const vault = this.app.vault;
+    const folderPath = this.profileFolder();
+    await this.ensureFolder(folderPath);
+    const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    const slug = body.slice(0, 30).replace(/[\\/:*?"<>|#\n\r]/g, "_");
+    const fileName = `${timestamp}_${slug}.md`;
+    const filePath = (0, import_obsidian20.normalizePath)(`${folderPath}/${fileName}`);
+    const frontmatter = [
+      "---",
+      "type: memory",
+      `created: ${(/* @__PURE__ */ new Date()).toISOString()}`,
+      "source: explicit",
+      `updated: ${(/* @__PURE__ */ new Date()).toISOString()}`,
+      "---",
+      "",
+      body,
+      ""
+    ].join("\n");
+    await vault.create(filePath, frontmatter);
+    console.log(`[MemoryManager] Saved explicit memory: ${filePath}`);
+  }
+  // ====== 写入：自动蒸馏（后台 fire-and-forget） ======
+  /** 把一轮对话抽取出的事实追加到当日日志 */
+  async appendJournalEntry(facts) {
+    if (!this.settings.enableMemory)
+      return;
+    if (!facts || facts.length === 0)
+      return;
+    const vault = this.app.vault;
+    const folderPath = this.journalFolder();
+    await this.ensureFolder(folderPath);
+    const date = this.dateStr(/* @__PURE__ */ new Date());
+    const filePath = (0, import_obsidian20.normalizePath)(`${folderPath}/${date}.md`);
+    const time = (/* @__PURE__ */ new Date()).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    const block = `
+## ${time}
+` + facts.map((f) => `- ${f}`).join("\n") + "\n";
+    const existing = vault.getAbstractFileByPath(filePath);
+    if (existing instanceof import_obsidian20.TFile) {
+      await vault.append(existing, block);
+    } else {
+      const header = `# \u8BB0\u5FC6\u65E5\u5FD7 ${date}
+`;
+      await vault.create(filePath, header + block);
+    }
+  }
+  // ====== 工具 ======
+  stripFrontmatter(content) {
+    const m = content.match(/^---\n[\s\S]*?\n---\n?/);
+    return m ? content.slice(m[0].length) : content;
+  }
+  /** 解析 YAML frontmatter 顶层 key: value（仅本模块需要的简单结构） */
+  parseFrontmatter(content) {
+    const fm = {};
+    const m = content.match(/^---\n([\s\S]*?)\n---\n?/);
+    if (!m)
+      return fm;
+    for (const line of m[1].split("\n")) {
+      const idx = line.indexOf(":");
+      if (idx <= 0)
+        continue;
+      const key = line.slice(0, idx).trim();
+      const val = line.slice(idx + 1).trim();
+      if (key)
+        fm[key] = val;
+    }
+    return fm;
+  }
+  /** 重建 frontmatter 区块（保持简单 key: value 结构，无引号包裹） */
+  serializeFrontmatter(fm) {
+    const lines = ["---"];
+    for (const k of Object.keys(fm)) {
+      lines.push(`${k}: ${fm[k]}`);
+    }
+    lines.push("---", "");
+    return lines.join("\n");
+  }
+  dateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  async ensureFolder(folderPath) {
+    const vault = this.app.vault;
+    const parts = folderPath.split("/").filter((p) => p.length > 0);
+    let cur = "";
+    for (const p of parts) {
+      cur = cur ? `${cur}/${p}` : p;
+      if (!vault.getAbstractFileByPath(cur)) {
+        await vault.createFolder(cur);
+      }
     }
   }
 };
@@ -11073,6 +11361,10 @@ var IndexManager = class {
       await this.save(entries);
     }
   }
+  /** 返回内存缓存的全部条目（供投影/排序/注入使用） */
+  getAll() {
+    return this.cache;
+  }
   /** 极简 YAML 解析：仅处理 `key: value`（值可为数字或字符串） */
   parseFrontmatter(raw) {
     const m = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
@@ -11137,7 +11429,10 @@ var IndexManager = class {
           topic: typeof fm.topic === "string" ? fm.topic : id,
           source_file: f,
           citation_count: 0,
-          retrieval_count: 0
+          retrieval_count: 0,
+          facies: fm.facies || void 0,
+          stance: fm.stance || void 0,
+          cross_cutting: Array.isArray(fm.cross_cutting) ? fm.cross_cutting : []
         });
       } catch (e) {
       }
@@ -11155,6 +11450,7 @@ var DailyBriefing = class {
     this.indexManager = indexManager;
     this.outputDir = config && config.outputDir || ".sediment/briefings";
     this.deviceName = config && config.deviceName || "default";
+    this.folderName = config && config.folderName || ".sediment";
   }
   formatDate(d) {
     const y = d.getFullYear();
@@ -11176,6 +11472,16 @@ var DailyBriefing = class {
       const body = raw.replace(/^---\s*\r?\n[\s\S]*?\r?\n---/, "").trim();
       const snippet = body.slice(0, 200).replace(/\s+/g, " ").trim();
       return snippet || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  async readDerived(name) {
+    const p = (0, import_obsidian23.normalizePath)(`${this.folderName}/derived/${name}.json`);
+    try {
+      if (!await this.app.vault.adapter.exists(p))
+        return null;
+      return JSON.parse(await this.app.vault.adapter.read(p));
     } catch (e) {
       return null;
     }
@@ -11206,6 +11512,51 @@ var DailyBriefing = class {
       if (s)
         snippet = `> ${s}`;
     }
+    const veins = await this.readDerived("veins") || [];
+    const faults = await this.readDerived("faults") || [];
+    const openFaults = faults.filter((f) => f.status === "open");
+    const unconfirmedVeins = veins.filter((v) => !v.confirmed);
+    let phase2 = "";
+    if (veins.length > 0 || faults.length > 0) {
+      phase2 += `
+## \u{1F48E} \u4ECA\u65E5\u7ED3\u6676\uFF08\u77FF\u8109\uFF09
+` + (veins.length ? veins.map((v) => `- ${v.label}${v.confirmed ? "\uFF08\u5DF2\u786E\u8BA4\uFF09" : "\uFF08\u5F85\u5BA1\u9605\uFF09"}`).join("\n") : "\uFF08\u6682\u65E0\uFF09") + `
+
+## \u26A1 \u5F20\u529B\u547D\u9898\uFF08\u65AD\u5C42\uFF09
+` + (openFaults.length ? openFaults.map((f) => `- ${f.summary}`).join("\n") : "\uFF08\u6682\u65E0\u51B2\u7A81\uFF09") + `
+
+## \u{1F9ED} \u65B0\u8FD1\u77FF\u8109\uFF08\u5F85\u5347\u6743\uFF09
+` + (unconfirmedVeins.length ? unconfirmedVeins.map((v) => `- ${v.label}`).join("\n") : "\uFF08\u6682\u65E0\uFF09") + `
+`;
+    }
+    const hybrids = await this.readDerived("hybrids") || [];
+    const unconfirmedHybrids = hybrids.filter((h) => !h.confirmed);
+    const manifest = await this.readDerived("compaction_manifest") || {
+      lastCompact: null
+    };
+    let compactionSummary = "\uFF08\u6682\u65E0\u538B\u5B9E\u8BB0\u5F55\uFF09";
+    if (manifest.lastCompact) {
+      const cd = new Date(manifest.lastCompact * 1e3);
+      const period = `${cd.getFullYear()}-${String(cd.getMonth() + 1).padStart(2, "0")}`;
+      const rec = await this.readDerived(`compaction-${period}`);
+      compactionSummary = rec && rec.summary ? rec.summary : "\uFF08\u672C\u671F\u65E0\u6458\u8981\uFF09";
+    }
+    const wormholes = await this.readDerived("wormhole_hits") || [];
+    let phase3 = "";
+    if (hybrids.length > 0 || manifest.lastCompact || wormholes.length > 0) {
+      phase3 += `
+## \u{1F4A1} \u7075\u611F\u6742\u4EA4\uFF08\u8BA4\u77E5\u6742\u4EA4\uFF09
+` + (hybrids.length ? hybrids.map((h) => `- ${h.title}${h.confirmed ? "\uFF08\u5DF2\u5347\u6743\uFF09" : "\uFF08\u5F85\u5BA1\u9605\uFF09"}`).join("\n") : "\uFF08\u6682\u65E0\uFF09") + `
+
+## \u{1FAA8} \u5468\u671F\u6027\u538B\u5B9E
+${compactionSummary}
+` + (unconfirmedHybrids.length ? `
+\u5F85\u5347\u6743\u7075\u611F\uFF1A${unconfirmedHybrids.map((h) => h.title).join("\u3001")}` : "") + `
+
+## \u{1FAB1} \u866B\u6D1E\u5BF9\u7167
+` + (wormholes.length ? wormholes.map((w) => `- [${w.relation}] ${w.explanation}`).join("\n") : "\uFF08\u6682\u65E0\uFF09") + `
+`;
+    }
     const body = `---
 type: sediment-briefing
 date: ${dateStr}
@@ -11221,7 +11572,7 @@ device: ${this.deviceName}
 ## \u{1F4DC} \u968F\u673A\u56DE\u987E
 ${snippet}
 
----
+` + phase2 + phase3 + `---
 *\u7531\u6C89\u79EF\u5C42\u5F15\u64CE\u81EA\u52A8\u751F\u6210*
 `;
     try {
@@ -11274,159 +11625,1179 @@ function applyGravityFilter(text, lastContent, config = DEFAULT_GRAVITY_CONFIG) 
   return { action: "record", reason: "default" };
 }
 
-// src/sediment/SedimentManager.ts
+// src/sediment/core/projection.ts
+function projectLayer(createdMs, nowMs, s) {
+  const ageDays = (nowMs - createdMs) / 864e5;
+  return ageDays >= s.sedimentMetamorph.tDays ? "L2" : "L1";
+}
+
+// src/sediment/constants.ts
+var RETRIEVAL_STEP = 0.05;
+var CITATION_WEIGHT = 0.1;
+var SURVIVAL_BASE = 0.5;
+var NOVELTY_TIME_DECAY_DAYS = 30;
+var EXPLORE_BOOST_FROM_CONFLICT = 0.3;
+var BEDROCK_LOW_WEIGHT = 0.3;
+var VEIN_LOW_WEIGHT = 0.2;
+var DERIVED_DIR = "derived";
+var BEDROCK_DIR = "bedrock";
+var DEFAULT_DECAY_FACTOR = 0.9;
+var WORMHOLE_COOLDOWN_MS = 8e3;
+var WORMHOLE_MAX_NOTE_BYTES = 2e4;
+var WORMHOLE_SAMPLE_ENTRIES = 12;
+var HYBRID_OLD_DAYS = 30;
+var HYBRID_PICK = 3;
+var HYBRID_LOW_WEIGHT_FACTOR = 0.3;
+var HYBRID_CONFIRM_BOOST = 2;
+var COMPACTION_MIN_MEMBERS = 3;
+
+// src/sediment/core/survival.ts
+function clamp01(x) {
+  return Math.max(0, Math.min(1, x));
+}
+function computeNovelty(e, _s) {
+  const ageDays = (Date.now() - e.timestamp * 1e3) / 864e5;
+  const score = Math.max(0, 1 - ageDays / (NOVELTY_TIME_DECAY_DAYS * 2));
+  return { score, reason: `age ${ageDays.toFixed(1)}d` };
+}
+function computeExploreBoost(e, _s) {
+  const ids = e.cross_cutting && e.cross_cutting.length > 0 ? e.cross_cutting : [];
+  const boost = ids.length > 0 ? EXPLORE_BOOST_FROM_CONFLICT : 0;
+  return { boost, related_ids: ids };
+}
+function computeSurvival(e, s) {
+  const survival = clamp01(
+    SURVIVAL_BASE + RETRIEVAL_STEP * e.retrieval_count + CITATION_WEIGHT * e.citation_count
+  );
+  const novelty = computeNovelty(e, s);
+  const explore = computeExploreBoost(e, s);
+  return { survival, novelty: novelty.score, explore_boost: explore.boost };
+}
+
+// src/sediment/storage/derived-store.ts
 var import_obsidian24 = require("obsidian");
+async function readJson2(app, folderName, name) {
+  const p = (0, import_obsidian24.normalizePath)(`${folderName}/derived/${name}.json`);
+  try {
+    if (!await app.vault.adapter.exists(p))
+      return null;
+    const raw = await app.vault.adapter.read(p);
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+async function writeJson(app, folderName, name, data) {
+  const dir = (0, import_obsidian24.normalizePath)(`${folderName}/derived`);
+  const p = (0, import_obsidian24.normalizePath)(`${dir}/${name}.json`);
+  try {
+    if (!await app.vault.adapter.exists(dir))
+      await app.vault.createFolder(dir);
+    await app.vault.adapter.write(p, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error("[derived-store] write failed:", e);
+  }
+}
+
+// src/sediment/metamorph.ts
+var import_obsidian25 = require("obsidian");
+init_llm_json();
+var MetamorphEngine = class {
+  constructor(app, folderName) {
+    this.app = app;
+    this.folderName = folderName;
+  }
+  genId() {
+    return `tenet_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+  }
+  async existingTenets() {
+    const cached = await readJson2(this.app, this.folderName, "bedrock_index");
+    if (cached)
+      return cached;
+    const dir = (0, import_obsidian25.normalizePath)(`${this.folderName}/${BEDROCK_DIR}`);
+    const out = [];
+    try {
+      const listing = await this.app.vault.adapter.list(dir);
+      for (const f of listing.files) {
+        try {
+          const raw = await this.app.vault.adapter.read(f);
+          const m = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
+          if (!m)
+            continue;
+          const fm = {};
+          for (const line of m[1].split("\n")) {
+            const i = line.indexOf(":");
+            if (i < 0)
+              continue;
+            fm[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+          }
+          out.push({
+            id: fm.id || f.split("/").pop().replace(/\.md$/, ""),
+            path: f,
+            tension: fm.tension || "",
+            assertion: fm.assertion || "",
+            source_ids: [],
+            status: fm.status || "open",
+            created: typeof fm.created === "number" ? fm.created : Date.now(),
+            updated: typeof fm.updated === "number" ? fm.updated : Date.now(),
+            weight: typeof fm.weight === "number" ? fm.weight : BEDROCK_LOW_WEIGHT
+          });
+        } catch (e) {
+        }
+      }
+    } catch (e) {
+    }
+    return out;
+  }
+  /** 执行变质：返回本次新生成的张力命题 */
+  async metamorph(entries, s, provider) {
+    const existing = await this.existingTenets();
+    const existingTopics = new Set(existing.map((t2) => t2.tension || t2.assertion));
+    const clusters = /* @__PURE__ */ new Map();
+    for (const e of entries) {
+      const key = (e.topic || "").trim().toLowerCase();
+      if (!key)
+        continue;
+      if (!clusters.has(key))
+        clusters.set(key, []);
+      clusters.get(key).push(e);
+    }
+    const newTenets = [];
+    let dailyCount = 0;
+    const cap = s.sedimentCaps.metamorphPerDay;
+    for (const [key, members] of clusters) {
+      if (dailyCount >= cap)
+        break;
+      if (members.length < s.sedimentMetamorph.n)
+        continue;
+      if (existingTopics.has(members[0].topic))
+        continue;
+      let tension = "";
+      let assertion = "";
+      if (provider) {
+        const prompt = `\u57FA\u4E8E\u8FD9\u4E9B\u8BA4\u77E5\u8282\u70B9\uFF0C\u63D0\u70BC\u4E00\u4E2A"\u5F20\u529B\u547D\u9898"\uFF1A
+- tension\uFF1A\u4E24\u80A1\u529B\u91CF\u4E3A\u4F55\u7D27\u5F20\uFF08\u6838\u5FC3\uFF0C\u4E0D\u8981\u7ED9\u7ED3\u8BBA\uFF09
+- assertion\uFF1A\u5F53\u524D\u503E\u5411\u6027\u8868\u8FF0\uFF08\u53EF\u88AB\u63A8\u7FFB\uFF09
+\u53EA\u8F93\u51FA JSON {tension, assertion}\u3002
+\u8282\u70B9\uFF1A
+` + members.map((m) => `- ${m.topic}: ${m.facies || ""} ${m.stance || ""}`).join("\n");
+        const r = await callJSON(provider, prompt);
+        tension = r && typeof r.tension === "string" ? r.tension : "";
+        assertion = r && typeof r.assertion === "string" ? r.assertion : members[0].topic;
+      } else {
+        assertion = members[0].topic;
+        tension = `\u5173\u4E8E\u300C${members[0].topic}\u300D\u5B58\u5728\u591A\u79CD\u53D6\u5411`;
+      }
+      if (!tension)
+        continue;
+      const id = this.genId();
+      const now = Date.now();
+      const path = (0, import_obsidian25.normalizePath)(`${this.folderName}/${BEDROCK_DIR}/${id}.md`);
+      const weight = s.sedimentWeight.survival * BEDROCK_LOW_WEIGHT;
+      const fm = `---
+id: ${id}
+type: bedrock
+tension: ${tension.replace(/\n/g, " ")}
+assertion: ${assertion.replace(/\n/g, " ")}
+source_ids: [${members.map((m) => m.id).join(", ")}]
+status: open
+created: ${now}
+updated: ${now}
+weight: ${weight}
+---
+`;
+      try {
+        const dir = (0, import_obsidian25.normalizePath)(`${this.folderName}/${BEDROCK_DIR}`);
+        if (!await this.app.vault.adapter.exists(dir))
+          await this.app.vault.createFolder(dir);
+        await this.app.vault.adapter.write(path, fm);
+      } catch (e) {
+        console.error("[MetamorphEngine] write failed:", e);
+        continue;
+      }
+      newTenets.push({
+        id,
+        path,
+        tension,
+        assertion,
+        source_ids: members.map((m) => m.id),
+        status: "open",
+        created: now,
+        updated: now,
+        weight
+      });
+      dailyCount++;
+    }
+    if (newTenets.length > 0) {
+      await writeJson(this.app, this.folderName, "bedrock_index", [...existing, ...newTenets]);
+    }
+    return newTenets;
+  }
+};
+
+// src/sediment/fault-detector.ts
+init_llm_json();
+var FaultDetector = class {
+  constructor(app, folderName) {
+    this.app = app;
+    this.folderName = folderName;
+  }
+  genId() {
+    return `fault_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+  }
+  isOpposing(a, b) {
+    const set = /* @__PURE__ */ new Set([a, b]);
+    return set.has("pro") && set.has("con");
+  }
+  async detect(entries, s, provider) {
+    const candidates = entries.filter(
+      (e) => e.topic && (e.stance === "pro" || e.stance === "con")
+    );
+    const existing = await readJson2(this.app, this.folderName, "faults") || [];
+    const cap = s.sedimentCaps.faultPerDay;
+    const out = [];
+    let daily = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      if (daily >= cap)
+        break;
+      for (let j = i + 1; j < candidates.length; j++) {
+        const a = candidates[i];
+        const b = candidates[j];
+        if (!this.isOpposing(a.stance, b.stance))
+          continue;
+        if ((a.topic || "").trim().toLowerCase() !== (b.topic || "").trim().toLowerCase())
+          continue;
+        let kind = "factual";
+        let summary = `\u300C${a.topic}\u300D\uFF1A\u4E00\u6761\u652F\u6301\u3001\u4E00\u6761\u53CD\u5BF9`;
+        if (provider) {
+          const prompt = `\u4E24\u6761\u5173\u4E8E\u300C${a.topic}\u300D\u7684\u6C89\u79EF\u76F8\u4E92\u51B2\u7A81\uFF0C\u5224\u65AD\u51B2\u7A81\u7C7B\u578B\u4E0E\u4E00\u53E5\u8BDD\u6458\u8981\u3002
+A(${a.stance}): ${a.topic}
+B(${b.stance}): ${b.topic}
+\u53EA\u8F93\u51FA JSON {kind:"factual|preference|plan", summary}\u3002`;
+          const r = await callJSON(provider, prompt);
+          if (r && r.kind)
+            kind = r.kind;
+          if (r && typeof r.summary === "string")
+            summary = r.summary;
+        }
+        const id = this.genId();
+        out.push({
+          id,
+          a_id: a.id,
+          b_id: b.id,
+          kind,
+          summary,
+          status: "open",
+          created: Date.now()
+        });
+        daily++;
+        if (daily >= cap)
+          break;
+      }
+    }
+    if (out.length > 0) {
+      await writeJson(this.app, this.folderName, "faults", [...existing, ...out]);
+    }
+    return out;
+  }
+};
+
+// src/sediment/contradiction-prescreen.ts
+function extractNumericTokens(text) {
+  const tokens = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const m of text.matchAll(/\b(19\d{2}|20\d{2})\b/g)) {
+    const v = Number(m[1]);
+    const key = `year:${v}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      tokens.push({ raw: m[1], value: v, kind: "year" });
+    }
+  }
+  for (const m of text.matchAll(/(\d{1,3})\s*岁/g)) {
+    const v = Number(m[1]);
+    if (v > 0 && v < 150) {
+      const key = `age:${v}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        tokens.push({ raw: m[1] + "\u5C81", value: v, kind: "age" });
+      }
+    }
+  }
+  for (const m of text.matchAll(/\b(\d{3,})\b/g)) {
+    if (/^(19\d{2}|20\d{2})$/.test(m[1]))
+      continue;
+    const v = Number(m[1]);
+    const key = `number:${v}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      tokens.push({ raw: m[1], value: v, kind: "number" });
+    }
+  }
+  return tokens;
+}
+function conflictingTokens(a, b) {
+  const conflicts = [];
+  const seen = /* @__PURE__ */ new Set();
+  const aByKind = {
+    year: /* @__PURE__ */ new Map(),
+    age: /* @__PURE__ */ new Map(),
+    number: /* @__PURE__ */ new Map()
+  };
+  const bByKind = {
+    year: /* @__PURE__ */ new Map(),
+    age: /* @__PURE__ */ new Map(),
+    number: /* @__PURE__ */ new Map()
+  };
+  for (const t2 of a)
+    if (!aByKind[t2.kind].has(t2.value))
+      aByKind[t2.kind].set(t2.value, t2);
+  for (const t2 of b)
+    if (!bByKind[t2.kind].has(t2.value))
+      bByKind[t2.kind].set(t2.value, t2);
+  for (const kind of ["year", "age", "number"]) {
+    const am = aByKind[kind];
+    const bm = bByKind[kind];
+    if (am.size === 0 || bm.size === 0)
+      continue;
+    for (const [val, at] of am) {
+      for (const [bval, bt] of bm) {
+        if (bval !== val) {
+          const msg = `\u540C\u4E3A${kindLabel(kind)}\u5374\u4E0D\u4E00\u81F4\uFF1A${at.raw} vs ${bt.raw}`;
+          if (!seen.has(msg)) {
+            seen.add(msg);
+            conflicts.push(msg);
+          }
+          break;
+        }
+      }
+    }
+  }
+  return conflicts;
+}
+function kindLabel(k) {
+  if (k === "year")
+    return "\u5E74\u4EFD";
+  if (k === "age")
+    return "\u5E74\u9F84";
+  return "\u6570\u503C";
+}
+function topicOverlap(a, b) {
+  const sa = (a || "").trim().toLowerCase();
+  const sb = (b || "").trim().toLowerCase();
+  if (!sa || !sb)
+    return false;
+  if (sa === sb)
+    return true;
+  if (sa.includes(sb) || sb.includes(sa))
+    return true;
+  const shorter = sa.length <= sb.length ? sa : sb;
+  const longer = sa.length <= sb.length ? sb : sa;
+  return longer.split(/[\s,，。、/]+/).some((tok) => tok.length >= 2 && shorter.includes(tok));
+}
+
+// src/sediment/vein.ts
+var VeinEngine = class {
+  constructor(app, folderName) {
+    this.app = app;
+    this.folderName = folderName;
+  }
+  genId() {
+    return `vein_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+  }
+  /** 确定性聚类（不调用 LLM）。返回本次产出的矿脉 */
+  clusterRelated(entries, s) {
+    const clusters = /* @__PURE__ */ new Map();
+    for (const e of entries) {
+      const key = (e.topic || "").trim().toLowerCase();
+      if (!key)
+        continue;
+      if (!clusters.has(key))
+        clusters.set(key, []);
+      clusters.get(key).push(e);
+    }
+    const out = [];
+    for (const [key, members] of clusters) {
+      if (members.length < s.sedimentMetamorph.n)
+        continue;
+      out.push({
+        id: this.genId(),
+        member_ids: members.map((m) => m.id),
+        label: members[0].topic,
+        survival_score: s.sedimentWeight.survival * VEIN_LOW_WEIGHT,
+        confirmed: false,
+        created: Date.now()
+      });
+    }
+    if (out.length > 0) {
+      void writeJson(this.app, this.folderName, "veins", out);
+    }
+    return out;
+  }
+  async load() {
+    return await readJson2(this.app, this.folderName, "veins") || [];
+  }
+  async confirm(id) {
+    const all = await this.load();
+    const next = all.map((v) => v.id === id ? { ...v, confirmed: true, survival_score: Math.max(v.survival_score, 0.7) } : v);
+    await writeJson(this.app, this.folderName, "veins", next);
+  }
+};
+
+// src/sediment/core/contrast.ts
+var FACIES_CONTRAST = {
+  correction: 0.5,
+  question: 0.2,
+  assumption: 0.15,
+  decision: 0.1,
+  reasoning: 0.1,
+  conclusion: 0.05,
+  reference: 0
+};
+var STANCE_CONTRAST = {
+  tension: 0.4,
+  con: 0.3,
+  neutral: 0.1,
+  pro: 0
+};
+function contrastScoreFor(e) {
+  const base = (e.facies ? FACIES_CONTRAST[e.facies] : 0) + (e.stance ? STANCE_CONTRAST[e.stance] : 0);
+  const ageDays = (Date.now() / 1e3 - e.timestamp) / 86400;
+  const ageBonus = ageDays > 180 && e.survival_score > 0.5 ? 0.1 : 0;
+  return Math.max(0, Math.min(1, base + ageBonus));
+}
+
+// src/sediment/core/rank.ts
+function rankScore(e, s) {
+  const w = s.sedimentWeight;
+  const { survival, novelty, explore_boost } = computeSurvival(e, s);
+  const contrast = contrastScoreFor(e);
+  return w.survival * survival + w.novelty * novelty + w.explore * explore_boost + w.contrast * contrast;
+}
+
+// src/sediment/context-injector.ts
+var ContextInjector = class {
+  buildContext(entries, s, budget) {
+    var _a, _b;
+    const maxBlocks = (_a = budget == null ? void 0 : budget.maxBlocks) != null ? _a : s.sedimentInjection.maxBlocks;
+    const maxTokens = (_b = budget == null ? void 0 : budget.maxTokens) != null ? _b : s.sedimentInjection.maxTokens;
+    const ranked = [...entries].filter((e) => e.source_file).sort((a, b) => rankScore(b, s) - rankScore(a, s));
+    const blocks = [];
+    let tokens = 0;
+    for (const e of ranked) {
+      if (blocks.length >= maxBlocks)
+        break;
+      const excerpt = `[${e.topic}] ${e.facies || ""}`.trim();
+      const t2 = excerpt.length;
+      if (tokens + t2 > maxTokens && blocks.length > 0)
+        break;
+      blocks.push({ path: e.source_file, excerpt, score: rankScore(e, s) });
+      tokens += t2;
+    }
+    return { blocks, tokens };
+  }
+};
+
+// src/sediment/wormhole.ts
+var import_obsidian28 = require("obsidian");
+init_llm_json();
+var REL_LABEL = {
+  contradiction: "\u77DB\u76FE",
+  resonance: "\u547C\u5E94",
+  evolution: "\u6F14\u5316"
+};
+var Wormhole = class {
+  constructor(app, folderName, getProvider, getEntries, isEnabled, cooldownMs = WORMHOLE_COOLDOWN_MS, onHits) {
+    this.timers = /* @__PURE__ */ new Map();
+    this.lastRun = /* @__PURE__ */ new Map();
+    this.lastHits = [];
+    this.eventRef = null;
+    this.app = app;
+    this.folderName = folderName;
+    this.getProvider = getProvider;
+    this.getEntries = getEntries;
+    this.isEnabled = isEnabled;
+    this.cooldownMs = cooldownMs;
+    this.onHits = onHits;
+  }
+  start() {
+    this.eventRef = this.app.vault.on(
+      "modify",
+      (file) => this.onModify(file)
+    );
+  }
+  stop() {
+    if (this.eventRef) {
+      this.app.vault.offref(this.eventRef);
+      this.eventRef = null;
+    }
+    for (const t2 of this.timers.values())
+      clearTimeout(t2);
+    this.timers.clear();
+  }
+  onModify(file) {
+    if (file.extension !== "md")
+      return;
+    if (file.path.includes(this.folderName))
+      return;
+    if (!this.isEnabled() || !this.getProvider())
+      return;
+    const now = Date.now();
+    const last = this.lastRun.get(file.path) || 0;
+    if (now - last < this.cooldownMs)
+      return;
+    const existing = this.timers.get(file.path);
+    if (existing)
+      clearTimeout(existing);
+    const handle = setTimeout(() => {
+      this.timers.delete(file.path);
+      this.lastRun.set(file.path, Date.now());
+      void this.scan(file.path);
+    }, this.cooldownMs);
+    this.timers.set(file.path, handle);
+  }
+  async scan(path) {
+    var _a;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof import_obsidian28.TFile))
+      return;
+    if (file.stat.size > WORMHOLE_MAX_NOTE_BYTES)
+      return;
+    const provider = this.getProvider();
+    if (!provider)
+      return;
+    const entries = this.getEntries();
+    if (!entries.length)
+      return;
+    const sample = [...entries].sort((a, b) => contrastScoreFor(b) - contrastScoreFor(a)).slice(0, WORMHOLE_SAMPLE_ENTRIES).map((e) => `- ${e.topic}\uFF08${e.facies || "?"} / ${e.stance || "?"}\uFF09`).join("\n");
+    const noteText = (await this.app.vault.read(file)).slice(0, 4e3);
+    const prompt = `\u4F60\u6B63\u5728\u5BF9\u7167\u7528\u6237\u6B63\u5728\u7F16\u8F91\u7684\u7B14\u8BB0\u4E0E\u4ED6\u7684"\u6C89\u79EF\u5C42"\u8BB0\u5FC6\uFF08\u8FC7\u53BB\u5BF9\u8BDD\u6C89\u6DC0\u7684\u8BA4\u77E5\u8282\u70B9\uFF09\u3002
+\u6C89\u79EF\u5C42\u6837\u672C\uFF1A
+${sample}
+
+\u7528\u6237\u7B14\u8BB0\u5185\u5BB9\uFF08\u524D 4000 \u5B57\uFF09\uFF1A
+${noteText}
+
+\u8BF7\u627E\u51FA\u7B14\u8BB0\u4E0E\u6C89\u79EF\u5C42\u4E4B\u95F4\u6700\u503C\u5F97\u63D0\u9192\u7684\u5BF9\u7167\uFF0C\u6700\u591A 3 \u6761\u3002\u4EC5\u8F93\u51FA JSON\uFF1A{"hits":[{"relation":"contradiction|resonance|evolution","note_excerpt":string,"sediment_excerpt":string,"explanation":string}]}`;
+    const res = await callJSON(provider, prompt);
+    if (res && Array.isArray(res.hits) && res.hits.length) {
+      const hits = res.hits.map((h) => ({
+        id: `wh_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+        relation: h.relation,
+        note_excerpt: h.note_excerpt,
+        sediment_excerpt: h.sediment_excerpt,
+        explanation: h.explanation,
+        created: Date.now()
+      }));
+      this.lastHits = hits;
+      await writeJson(this.app, this.folderName, "wormhole_hits", hits);
+      (_a = this.onHits) == null ? void 0 : _a.call(this, hits);
+      new import_obsidian28.Notice(
+        `\u{1FAB1} \u866B\u6D1E\uFF1A${hits.map((h) => REL_LABEL[h.relation]).join("\u3001")} ${hits.length} \u5904`
+      );
+    }
+  }
+  getHits() {
+    return this.lastHits;
+  }
+  async loadPersisted() {
+    const h = await readJson2(this.app, this.folderName, "wormhole_hits");
+    this.lastHits = h || [];
+    return this.lastHits;
+  }
+};
+
+// src/sediment/hybridize.ts
+init_llm_json();
+var DAY = 86400;
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+async function runHybridization(app, folderName, provider, entries, s, now = Date.now()) {
+  const old = entries.filter(
+    (e) => e.status === "active" && now / 1e3 - e.timestamp > HYBRID_OLD_DAYS * DAY
+  );
+  if (old.length < 2 || !provider)
+    return [];
+  const picks = shuffle([...old]).slice(0, Math.min(HYBRID_PICK, old.length));
+  const sample = picks.map((e) => `- ${e.topic}\uFF08${e.facies || "?"} / ${e.stance || "?"}\uFF09[id:${e.id}]`).join("\n");
+  const prompt = `\u4EE5\u4E0B\u662F\u4ECE\u4F60\u8FC7\u53BB\u6C89\u79EF\u5C42\u4E2D\u968F\u673A\u62BD\u53D6\u3001\u76F8\u9694 30 \u5929\u4EE5\u4E0A\u7684\u51E0\u6761\u8BA4\u77E5\u8282\u70B9\u3002
+\u8BF7\u505A\u4E00\u4E2A"\u53D7\u63A7\u7075\u611F\u6742\u4EA4"\uFF1A\u627E\u51FA\u5B83\u4EEC\u4E4B\u95F4\u975E\u663E\u800C\u6613\u89C1\u7684\u8054\u7CFB\uFF0C\u4EA7\u51FA 1~2 \u6761\u7075\u611F\u5408\u6210\uFF08\u662F\u542F\u53D1\u800C\u975E\u7ED3\u8BBA\uFF09\u3002
+\u4EC5\u8F93\u51FA JSON\uFF1A{"insights":[{"title":string,"synthesis":string,"node_ids":[string]}]}
+\u8282\u70B9\uFF1A
+${sample}`;
+  const res = await callJSON(provider, prompt);
+  if (!res || !Array.isArray(res.insights) || !res.insights.length)
+    return [];
+  const existing = await readJson2(app, folderName, "hybrids") || [];
+  const weight = s.sedimentWeight.survival * HYBRID_LOW_WEIGHT_FACTOR;
+  const created = res.insights.map((it) => ({
+    id: `hyb_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+    title: it.title || "\u672A\u547D\u540D\u7075\u611F",
+    synthesis: it.synthesis || "",
+    node_ids: (it.node_ids || []).filter((id) => picks.some((p) => p.id === id)),
+    weight,
+    confirmed: false,
+    created: now
+  }));
+  await writeJson(app, folderName, "hybrids", [...existing, ...created]);
+  return created;
+}
+
+// src/sediment/compaction.ts
+init_llm_json();
+var DAY2 = 86400;
+async function maybeCompact(app, folderName, provider, entries, s, now = Date.now()) {
+  const manifest = await readJson2(app, folderName, "compaction_manifest") || {
+    lastCompact: null
+  };
+  const intervalSec = s.sedimentCompactionDays * DAY2;
+  if (manifest.lastCompact && now / 1e3 - manifest.lastCompact < intervalSec) {
+    return { record: null, supersededIds: [] };
+  }
+  const minAgeSec = s.sedimentCompactionMinAgeDays * DAY2;
+  const cands = entries.filter(
+    (e) => e.status === "active" && now / 1e3 - e.timestamp > minAgeSec
+  );
+  if (cands.length < COMPACTION_MIN_MEMBERS || !provider) {
+    await writeJson(app, folderName, "compaction_manifest", {
+      lastCompact: Math.floor(now / 1e3)
+    });
+    return { record: null, supersededIds: [] };
+  }
+  const sample = cands.slice(0, 30).map((e) => `- ${e.topic}\uFF08${e.facies || "?"} / ${e.stance || "?"}\uFF09`).join("\n");
+  const prompt = `\u4EE5\u4E0B\u662F\u4E00\u6279\u8F83\u65E9\u7684\u6C89\u79EF\u5C42\u8BA4\u77E5\u8282\u70B9\uFF0C\u8BF7\u538B\u5B9E\u4E3A\u4E00\u4EFD\u7B80\u660E\u6D3E\u751F\u6458\u8981\uFF1A
+1) summary\uFF1A\u5BF9\u8FD9\u6279\u8BB0\u5FC6\u7684\u6574\u4F53\u6982\u62EC\uFF1B2) key_tenets\uFF1A3~6 \u6761\u4ECD\u7AD9\u5F97\u4F4F\u7684\u6838\u5FC3\u547D\u9898\uFF1B3) superseded_ids\uFF1A\u5176\u4E2D\u5DF2\u88AB\u65F6\u4EE3\u6DD8\u6C70\u3001\u53EF\u6807\u8BB0\u4E3A superseded \u7684\u65E7\u8282\u70B9 id\uFF08\u53EA\u586B id\uFF09\u3002
+\u4EC5\u8F93\u51FA JSON\uFF1A{"summary":string,"key_tenets":[string],"superseded_ids":[string]}
+\u8282\u70B9\uFF1A
+${sample}`;
+  const res = await callJSON(provider, prompt);
+  const d = new Date(now);
+  const period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const supersededIds = res && Array.isArray(res.superseded_ids) ? res.superseded_ids.filter((id) => cands.some((c) => c.id === id)) : [];
+  const record = {
+    id: `comp_${Date.now().toString(36)}`,
+    period,
+    summary: res && res.summary ? res.summary : "",
+    key_tenets: res && Array.isArray(res.key_tenets) ? res.key_tenets : [],
+    member_ids: cands.map((c) => c.id),
+    superseded_ids: supersededIds,
+    created: now
+  };
+  await writeJson(app, folderName, `compaction-${period}`, record);
+  await writeJson(app, folderName, "compaction_manifest", {
+    lastCompact: Math.floor(now / 1e3)
+  });
+  return { record, supersededIds };
+}
+
+// src/sediment/SedimentManager.ts
+var import_obsidian31 = require("obsidian");
 var I18N = {
-  statusBarIdle: "\u{1FAA8} \u6C89\u79EF\u5C42\u6D3B\u8DC3",
-  statusBarDeposit: (n) => `\u{1FAA8} \u6C89\u79EF\u5C42: \u4ECA\u65E5 +${n}`,
-  statusBarConflict: (n) => `\u26A1 \u6C89\u79EF\u5C42: ${n} \u5904\u65AD\u5C42\u5F85\u89C2\u5BDF`,
-  briefingTitle: (date) => `\u{1FAA8} \u6C89\u79EF\u5C42\u65E5\u62A5 \u2014 ${date}`
+  statusBarIdle: "\u6C89\u79EF\u5C42\u6D3B\u8DC3",
+  statusBarDeposit: (n) => `\u4ECA\u65E5 +${n}`,
+  statusBarConflict: (n) => `\u65AD\u5C42 ${n}`,
+  statusBarFull: (fossil, fault, vein, wormhole = 0, hybrid = 0) => `\u{1F48E} ${fossil} \xB7 \u65AD\u5C42 ${fault} \xB7 \u77FF\u8109 ${vein}` + (wormhole ? ` \xB7 \u{1FAB1} ${wormhole}` : "") + (hybrid ? ` \xB7 \u{1F4A1} ${hybrid}` : ""),
+  briefingTitle: (date) => `\u6C89\u79EF\u5C42\u65E5\u62A5\uFF08${date}\uFF09`
 };
 var SedimentManager6 = class {
   constructor(app, indicator, config) {
+    this.provider = null;
+    this.analysisEnabled = false;
+    this.decayTimer = null;
     this.todayCount = 0;
-    this.todayKey = "";
-    this.pendingEntries = [];
-    this.debounceTimer = null;
+    this.faultCount = 0;
+    this.veinCount = 0;
+    this.wormhole = null;
+    this.wormholeCount = 0;
+    this.hybridCount = 0;
     this.app = app;
     this.indicator = indicator;
-    this.folderName = config && config.folderName || ".sediment";
-    this.deviceName = config && config.deviceName || "default";
-    this.isEnabledFn = config && config.isEnabled ? config.isEnabled : () => true;
-    this.isBriefingEnabledFn = config && config.isBriefingEnabled ? config.isBriefingEnabled : () => true;
+    this.folderName = config.folderName || ".sediment";
+    this.deviceName = config.deviceName || "default";
+    this.isEnabled = typeof config.isEnabled === "function" ? config.isEnabled : () => config.isEnabled !== false;
+    this.isBriefingEnabled = typeof config.isBriefingEnabled === "function" ? config.isBriefingEnabled : () => config.isBriefingEnabled !== false;
+    this.settings = config.settings;
     this.l1Writer = new L1Writer(app, { folderName: this.folderName });
     this.indexManager = new IndexManager(app, { folderName: this.folderName });
-    this.dailyBriefing = new DailyBriefing(app, this.l1Writer, this.indexManager, {
+    this.briefing = new DailyBriefing(app, this.l1Writer, this.indexManager, {
       outputDir: `${this.folderName}/briefings`,
-      deviceName: this.deviceName
+      deviceName: this.deviceName,
+      folderName: this.folderName
     });
-    this.resetTodayIfNeeded();
-    this.indicator.setTodayCount(this.todayCount);
-    this.indicator.onClick(() => {
-      this.openBriefing();
-    });
+    this.metamorph = new MetamorphEngine(app, this.folderName);
+    this.faultDetector = new FaultDetector(app, this.folderName);
+    this.vein = new VeinEngine(app, this.folderName);
+    this.injector = new ContextInjector();
+    this.wormhole = new Wormhole(
+      app,
+      this.folderName,
+      () => this.provider,
+      () => this.indexManager.getAll(),
+      () => this.settings.enableSedimentWormhole,
+      void 0,
+      (hits) => {
+        this.wormholeCount = hits.length;
+        this.statusBarUpdate();
+      }
+    );
+    this.wormhole.start();
     this.updateIndicatorVisibility();
   }
-  /** 重力筛选入口：被蒸发返回 false，否则写入 L1 并刷新索引/状态栏 */
-  async processContent(content, topic) {
-    if (!this.isEnabledFn())
-      return false;
-    const result = applyGravityFilter(content, this.lastContent);
-    this.lastContent = content;
-    if (result.action === "evaporate") {
-      return false;
+  updateSettings(s) {
+    this.settings = s;
+  }
+  setProvider(provider) {
+    this.provider = provider;
+  }
+  setAnalysisEnabled(v) {
+    this.analysisEnabled = v;
+    if (v) {
+      void this.runAnalysisPass();
+      if (!this.decayTimer) {
+        this.decayTimer = setInterval(() => this.decayDaily(), 24 * 3600 * 1e3);
+      }
+    } else if (this.decayTimer) {
+      clearInterval(this.decayTimer);
+      this.decayTimer = null;
     }
-    const filePath = await this.l1Writer.deposit(content, topic, {
-      filter_result: result.action
-    });
-    if (!filePath)
+  }
+  buildL1Path(id) {
+    const d = /* @__PURE__ */ new Date();
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate()
+    ).padStart(2, "0")}`;
+    const time = `${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(
+      2,
+      "0"
+    )}${String(d.getSeconds()).padStart(2, "0")}`;
+    return (0, import_obsidian31.normalizePath)(`${this.folderName}/L1/${date}/${time}_${id}.md`);
+  }
+  /** 终答后台沉积（带 LLM 抽得的认知节点） */
+  async depositTurn(userText, assistantText, nodes) {
+    if (!this.isEnabled())
       return false;
-    const id = filePath.split("/").pop().replace(/\.md$/, "");
-    const label = (topic && topic.trim() ? topic.trim() : content.trim()).replace(/[\\/:?"<>|]/g, "").slice(0, 20).trim();
+    const content = `[\u7528\u6237] ${userText}
+
+[\u52A9\u624B] ${assistantText}`;
+    const fr = applyGravityFilter(content);
+    if (fr.action !== "record")
+      return false;
+    const id = `s_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+    const topic = nodes && nodes.length ? nodes[0].content.slice(0, 40) : userText.slice(0, 40);
+    const facies = nodes && nodes.length ? nodes[0].facies : void 0;
+    const stance = nodes && nodes.length ? nodes[0].stance : void 0;
+    const path = await this.l1Writer.deposit(content, topic);
+    if (!path)
+      return false;
     const entry = {
       id,
       layer: "L1",
       timestamp: Math.floor(Date.now() / 1e3),
-      survival_score: result.action === "mark_high" ? 0.8 : 0.5,
+      survival_score: 0.5,
       novelty_score: 1,
       explore_boost: 0,
       status: "active",
-      topic: label,
-      source_file: filePath,
+      topic,
+      source_file: path,
       citation_count: 0,
-      retrieval_count: 0
+      retrieval_count: 0,
+      facies,
+      stance,
+      cross_cutting: []
     };
-    this.scheduleIndexAdd(entry);
-    this.resetTodayIfNeeded();
-    this.todayCount += 1;
-    this.indicator.setTodayCount(this.todayCount);
+    await this.indexManager.addEntry(entry);
+    this.todayCount++;
+    this.statusBarUpdate();
     return true;
   }
-  /** 索引写入（500ms 防抖合并） */
-  scheduleIndexAdd(entry) {
-    this.pendingEntries.push(entry);
-    if (this.debounceTimer !== null)
-      return;
-    this.debounceTimer = window.setTimeout(() => {
-      this.debounceTimer = null;
-      this.flushIndex();
-    }, 500);
+  /** 手动/兼容入口（无 LLM）；ManualSedimentModal 调用 */
+  async processContent(overflow, topic) {
+    if (!this.isEnabled())
+      return false;
+    const fr = applyGravityFilter(overflow);
+    if (fr.action !== "record")
+      return false;
+    const id = `s_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+    const t2 = topic || overflow.slice(0, 40);
+    const path = await this.l1Writer.deposit(overflow, t2);
+    if (!path)
+      return false;
+    const entry = {
+      id,
+      layer: "L1",
+      timestamp: Math.floor(Date.now() / 1e3),
+      survival_score: 0.5,
+      novelty_score: 1,
+      explore_boost: 0,
+      status: "active",
+      topic: t2,
+      source_file: path,
+      citation_count: 0,
+      retrieval_count: 0,
+      cross_cutting: []
+    };
+    await this.indexManager.addEntry(entry);
+    this.todayCount++;
+    this.statusBarUpdate();
+    return true;
   }
-  async flushIndex() {
-    if (this.pendingEntries.length === 0)
+  /** 反差注入上下文（仅分析开启时返回） */
+  buildInjectionContext() {
+    if (!this.analysisEnabled)
+      return null;
+    const entries = this.indexManager.getAll();
+    if (!entries.length)
+      return null;
+    return this.injector.buildContext(entries, this.settings);
+  }
+  /** 后台分析 pass：变质 + 断层 + 矿脉 + 计数更新 */
+  async runAnalysisPass() {
+    if (!this.analysisEnabled)
       return;
     const entries = await this.indexManager.load();
-    const map = new Map(entries.map((e) => [e.id, e]));
-    for (const e of this.pendingEntries)
-      map.set(e.id, e);
-    const merged = Array.from(map.values());
-    this.pendingEntries = [];
-    await this.indexManager.save(merged);
+    if (!entries.length)
+      return;
+    await this.metamorph.metamorph(entries, this.settings, this.provider);
+    const faults = await this.faultDetector.detect(entries, this.settings, this.provider);
+    const veins = this.vein.clusterRelated(entries, this.settings);
+    const prescreened = await this.runContradictionPrescreen(entries);
+    const allNew = [...faults, ...prescreened];
+    for (const f of allNew) {
+      await this.indexManager.updateEntry(f.a_id, { cross_cutting: [f.id] });
+      await this.indexManager.updateEntry(f.b_id, { cross_cutting: [f.id] });
+    }
+    this.faultCount = allNew.filter((f) => f.status === "open").length;
+    this.veinCount = veins.length;
+    this.statusBarUpdate();
+    await this.runCompactionPass();
   }
-  todayKeyStr() {
-    const d = /* @__PURE__ */ new Date();
-    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-  }
-  resetTodayIfNeeded() {
-    const k = this.todayKeyStr();
-    if (k !== this.todayKey) {
-      this.todayKey = k;
-      this.todayCount = 0;
+  /** rebuild 命令后重算派生态（存活率/新颖度/探索加成） */
+  async recomputeDerivedState() {
+    const entries = await this.indexManager.load();
+    for (const e of entries) {
+      const { survival, novelty, explore_boost } = computeSurvival(e, this.settings);
+      const layer = projectLayer(e.timestamp * 1e3, Date.now(), this.settings);
+      await this.indexManager.updateEntry(e.id, {
+        survival_score: survival,
+        novelty_score: novelty,
+        explore_boost,
+        layer
+      });
     }
   }
-  /** 今日新增数量（状态栏/简报用） */
-  getTodayDepositCount() {
-    this.resetTodayIfNeeded();
-    return this.todayCount;
+  decayDaily() {
+    void (async () => {
+      const entries = await this.indexManager.load();
+      const factor = this.settings.sedimentDecay.dailyFactor;
+      for (const e of entries) {
+        await this.indexManager.updateEntry(e.id, {
+          retrieval_count: Math.floor(e.retrieval_count * factor)
+        });
+      }
+    })();
   }
-  /** 布局就绪后尝试生成今日地质简报（幂等）。受总开关与「每日简报」子开关双重控制。 */
-  async tryGenerateBriefing() {
-    if (!this.isEnabledFn() || !this.isBriefingEnabledFn())
-      return false;
-    return this.dailyBriefing.tryGenerate();
-  }
-  /** 实时读取总开关状态（供手动沉积等场景判断） */
-  isEnabled() {
-    return this.isEnabledFn();
-  }
-  /** 设置页总开关变化时调用：刷新状态栏可见性 */
-  updateIndicatorVisibility() {
-    this.indicator.setEnabled(this.isEnabledFn());
-  }
-  /** 命令：从磁盘重建索引并刷新状态栏 */
   async rebuildIndex() {
     const entries = await this.indexManager.rebuildFromMarkdown();
     await this.indexManager.save(entries);
-    this.resetTodayIfNeeded();
-    const todayStart = /* @__PURE__ */ new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    this.todayCount = entries.filter(
-      (e) => e.timestamp * 1e3 >= todayStart.getTime()
-    ).length;
-    this.indicator.setTodayCount(this.todayCount);
+    await this.recomputeDerivedState();
+    const todayStart = this.startOfToday();
+    this.todayCount = entries.filter((e) => e.timestamp * 1e3 >= todayStart).length;
+    this.statusBarUpdate();
   }
-  /** 点击状态栏：打开今日简报，不存在则生成 */
-  async openBriefing() {
-    const dateStr = this.formatDate(/* @__PURE__ */ new Date());
-    const filePath = (0, import_obsidian24.normalizePath)(
-      `${this.folderName}/briefings/\u6C89\u79EF\u5C42\u65E5\u62A5-${this.deviceName}-${dateStr}.md`
+  startOfToday() {
+    const d = /* @__PURE__ */ new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  async tryGenerateBriefing() {
+    if (!this.isBriefingEnabled())
+      return false;
+    return await this.briefing.tryGenerate();
+  }
+  updateIndicatorVisibility() {
+    var _a;
+    (_a = this.indicator) == null ? void 0 : _a.setEnabled(this.isEnabled());
+  }
+  statusBarUpdate() {
+    var _a;
+    (_a = this.indicator) == null ? void 0 : _a.setCounts(
+      this.todayCount,
+      this.faultCount,
+      this.veinCount,
+      this.wormholeCount,
+      this.hybridCount
     );
-    let file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!(file instanceof import_obsidian24.TFile)) {
-      await this.dailyBriefing.tryGenerate();
-      file = this.app.vault.getAbstractFileByPath(filePath);
+  }
+  onunload() {
+    var _a;
+    if (this.decayTimer) {
+      clearInterval(this.decayTimer);
+      this.decayTimer = null;
     }
-    if (file instanceof import_obsidian24.TFile) {
-      await this.app.workspace.getLeaf(false).openFile(file);
+    (_a = this.wormhole) == null ? void 0 : _a.stop();
+  }
+  // —— 命令/弹窗支持 ——
+  async getOpenFaults() {
+    const all = await readJson2(this.app, this.folderName, "faults") || [];
+    return all.filter((f) => f.status === "open");
+  }
+  async writeTenet(tension, assertion, sourceIds) {
+    const id = `tenet_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+    const now = Date.now();
+    const path = (0, import_obsidian31.normalizePath)(`${this.folderName}/bedrock/${id}.md`);
+    const fm = `---
+id: ${id}
+type: bedrock
+tension: ${tension.replace(/\n/g, " ")}
+assertion: ${assertion.replace(/\n/g, " ")}
+source_ids: [${sourceIds.join(", ")}]
+status: open
+created: ${now}
+updated: ${now}
+weight: ${this.settings.sedimentWeight.survival * 0.3}
+---
+`;
+    const dir = (0, import_obsidian31.normalizePath)(`${this.folderName}/bedrock`);
+    if (!await this.app.vault.adapter.exists(dir))
+      await this.app.vault.createFolder(dir);
+    await this.app.vault.adapter.write(path, fm);
+    const tenet = {
+      id,
+      path,
+      tension,
+      assertion,
+      source_ids: sourceIds,
+      status: "open",
+      created: now,
+      updated: now,
+      weight: this.settings.sedimentWeight.survival * 0.3
+    };
+    const idx = await readJson2(this.app, this.folderName, "bedrock_index") || [];
+    await writeJson(this.app, this.folderName, "bedrock_index", [...idx, tenet]);
+    return tenet;
+  }
+  /** 裁决断层：生成/关联张力命题并标记 adjudicated */
+  async adjudicateFault(faultId, tension, assertion) {
+    const tenet = await this.writeTenet(tension, assertion, []);
+    const all = await readJson2(this.app, this.folderName, "faults") || [];
+    const next = all.map(
+      (f) => f.id === faultId ? { ...f, status: "adjudicated", resolved_by: tenet.id } : f
+    );
+    await writeJson(this.app, this.folderName, "faults", next);
+    this.faultCount = next.filter((f) => f.status === "open").length;
+    this.statusBarUpdate();
+  }
+  /** 标记断层无关（仅标记 resolved，不生成 tenet） */
+  async dismissFault(faultId) {
+    const all = await readJson2(this.app, this.folderName, "faults") || [];
+    const next = all.map(
+      (f) => f.id === faultId ? { ...f, status: "adjudicated" } : f
+    );
+    await writeJson(this.app, this.folderName, "faults", next);
+    this.faultCount = next.filter((f) => f.status === "open").length;
+    this.statusBarUpdate();
+  }
+  async getUnconfirmedVeins() {
+    const all = await readJson2(
+      this.app,
+      this.folderName,
+      "veins"
+    ) || [];
+    return all.filter((v) => !v.confirmed).map((v) => ({ id: v.id, label: v.label }));
+  }
+  async confirmVein(veinId) {
+    await this.vein.confirm(veinId);
+    const veins = await this.vein.load();
+    this.veinCount = veins.length;
+    this.statusBarUpdate();
+  }
+  // —— Phase 3 主动进化 ——
+  /** 加载实时虫洞对照记录（落盘 / 内存），刷新状态栏 🪱 计数 */
+  async loadWormholeHits() {
+    if (!this.wormhole)
+      return [];
+    const hits = await this.wormhole.loadPersisted();
+    this.wormholeCount = hits.length;
+    this.statusBarUpdate();
+    return hits;
+  }
+  /** 认知杂交 pass：仅命令触发，生成默认低权灵感 */
+  async runHybridizationPass() {
+    if (!this.analysisEnabled || !this.provider) {
+      new import_obsidian31.Notice("\u8BA4\u77E5\u6742\u4EA4\u9700\u5148\u5F00\u542F\u300C\u6C89\u79EF\u5C42\u6DF1\u5EA6\u5206\u6790\u300D\u5E76\u914D\u7F6E LLM Provider");
+      return 0;
+    }
+    const entries = this.indexManager.getAll();
+    const created = await runHybridization(
+      this.app,
+      this.folderName,
+      this.provider,
+      entries,
+      this.settings
+    );
+    if (created.length) {
+      new import_obsidian31.Notice(`\u{1F4A1} \u8BA4\u77E5\u6742\u4EA4\u751F\u6210 ${created.length} \u6761\u7075\u611F\uFF08\u9ED8\u8BA4\u4F4E\u6743\uFF0C\u9700\u786E\u8BA4\u5347\u6743\uFF09`);
     } else {
-      new import_obsidian24.Notice("\u4ECA\u65E5\u7B80\u62A5\u5C1A\u672A\u751F\u6210");
+      new import_obsidian31.Notice("\u8BA4\u77E5\u6742\u4EA4\uFF1A\u6682\u65E0\u53EF\u6742\u4EA4\u7684\u65E7\u8282\u70B9\uFF08\u9700 >30 \u5929\u4E14 \u22652 \u6761\uFF09");
+    }
+    this.hybridCount = (await this.getUnconfirmedHybrids()).length;
+    this.statusBarUpdate();
+    return created.length;
+  }
+  async getUnconfirmedHybrids() {
+    const all = await readJson2(this.app, this.folderName, "hybrids") || [];
+    return all.filter((h) => !h.confirmed);
+  }
+  /** 标「有启发」升权：灵感权重翻倍（封顶 1），来源节点探索加成 +0.2 */
+  async confirmHybrid(id) {
+    const all = await readJson2(this.app, this.folderName, "hybrids") || [];
+    let target;
+    const next = all.map((h) => {
+      if (h.id !== id)
+        return h;
+      target = h;
+      const w = Math.min(1, h.weight * HYBRID_CONFIRM_BOOST);
+      return { ...h, confirmed: true, weight: w };
+    });
+    await writeJson(this.app, this.folderName, "hybrids", next);
+    if (target) {
+      for (const nid of target.node_ids) {
+        const e = this.indexManager.getAll().find((x) => x.id === nid);
+        if (e) {
+          await this.indexManager.updateEntry(nid, {
+            explore_boost: Math.min(1, e.explore_boost + 0.2)
+          });
+        }
+      }
+    }
+    this.hybridCount = next.filter((h) => !h.confirmed).length;
+    this.statusBarUpdate();
+  }
+  /** 周期性压实：到期才写独立派生摘要，化石内容不可变（仅标 superseded） */
+  async runCompactionPass() {
+    if (!this.analysisEnabled || !this.provider)
+      return;
+    const entries = this.indexManager.getAll();
+    const { record, supersededIds } = await maybeCompact(
+      this.app,
+      this.folderName,
+      this.provider,
+      entries,
+      this.settings
+    );
+    if (record) {
+      for (const sid of supersededIds) {
+        await this.indexManager.updateEntry(sid, { status: "superseded" });
+      }
+      new import_obsidian31.Notice(
+        `\u{1FAA8} \u6C89\u79EF\u5C42\u538B\u5B9E\u5B8C\u6210\uFF08${record.period}\uFF0C\u8986\u76D6 ${record.member_ids.length} \u6761\u65E7\u5316\u77F3\uFF09`
+      );
     }
   }
-  formatDate(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
+  /** 矛盾预筛：对最近 1 小时新化石做确定性数字/日期比对，零 LLM 产出候选断层 */
+  async runContradictionPrescreen(entries) {
+    const nowSec = Math.floor(Date.now() / 1e3);
+    const recent = entries.filter((e) => e.source_file && e.timestamp > nowSec - 3600);
+    if (!recent.length)
+      return [];
+    const existing = await readJson2(this.app, this.folderName, "faults") || [];
+    const openCount = existing.filter((f) => f.status === "open").length;
+    const room = Math.max(0, this.settings.sedimentCaps.faultPerDay - openCount);
+    if (room <= 0)
+      return [];
+    const out = [];
+    for (const r of recent) {
+      if (out.length >= room)
+        break;
+      let rText = "";
+      try {
+        rText = await this.app.vault.adapter.read(r.source_file);
+      } catch (e) {
+        continue;
+      }
+      const rTokens = extractNumericTokens(rText);
+      if (!rTokens.length)
+        continue;
+      for (const o of entries) {
+        if (o.id === r.id || !o.source_file)
+          continue;
+        if (o.timestamp >= r.timestamp)
+          continue;
+        if (!topicOverlap(r.topic, o.topic))
+          continue;
+        let oText = "";
+        try {
+          oText = await this.app.vault.adapter.read(o.source_file);
+        } catch (e) {
+          continue;
+        }
+        const conflicts = conflictingTokens(rTokens, extractNumericTokens(oText));
+        if (conflicts.length) {
+          out.push({
+            id: this.genFaultId(),
+            a_id: o.id,
+            b_id: r.id,
+            kind: "factual",
+            summary: `\u7591\u4F3C\u4E8B\u5B9E\u77DB\u76FE\uFF08\u6570\u5B57/\u65E5\u671F\u51B2\u7A81\uFF09\uFF1A${conflicts.join("\uFF1B")}`,
+            status: "open",
+            created: Date.now(),
+            prescreen: true
+          });
+          if (out.length >= room)
+            break;
+        }
+      }
+    }
+    if (out.length)
+      await writeJson(this.app, this.folderName, "faults", [...existing, ...out]);
+    return out;
+  }
+  genFaultId() {
+    return "flt_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+  }
+  /** 事实演化时间线（借 MemPalace 时序知识图）：按主题汇总断层/演化，生成可读 Markdown */
+  async generateEvolutionTimeline() {
+    await this.ensureSedimentFolder();
+    const faults = await readJson2(this.app, this.folderName, "faults") || [];
+    const entries = await this.indexManager.load();
+    const byTopic = /* @__PURE__ */ new Map();
+    for (const f of faults) {
+      const a = entries.find((e) => e.id === f.a_id);
+      const b = entries.find((e) => e.id === f.b_id);
+      const topic = ((a == null ? void 0 : a.topic) || (b == null ? void 0 : b.topic) || "\u672A\u547D\u540D\u4E3B\u9898").trim();
+      const time = new Date(f.created).toISOString().slice(0, 10);
+      const tag = f.prescreen ? "\u9884\u7B5B" : "\u65AD\u5C42";
+      const st = f.status === "adjudicated" ? "\u5DF2\u88C1\u51B3" : "\u5F85\u88C1\u51B3";
+      const arr = byTopic.get(topic) || [];
+      arr.push(`- ${time} [${tag}] ${f.summary}\uFF08${st}\uFF09`);
+      byTopic.set(topic, arr);
+    }
+    const lines = [
+      "# \u6C89\u79EF\u5C42\u4E8B\u5B9E\u6F14\u5316\u65F6\u95F4\u7EBF",
+      "",
+      "_\u6309\u4E3B\u9898\u6C47\u603B\u7684\u5386\u53F2\u89C2\u70B9\u51B2\u7A81\u4E0E\u6F14\u5316\uFF1B\u5F00\u542F\u6DF1\u5EA6\u5206\u6790\u540E\u7F16\u8F91\u7B14\u8BB0\u4F1A\u9010\u6B65\u79EF\u7D2F\u3002_",
+      ""
+    ];
+    if (byTopic.size === 0)
+      lines.push("_\u6682\u65E0\u8BB0\u5F55\u3002_");
+    for (const [topic, items] of byTopic) {
+      lines.push(`## ${topic}`, ...items, "");
+    }
+    const content = lines.join("\n");
+    const path = (0, import_obsidian31.normalizePath)(`${this.folderName}/evolution-timeline.md`);
+    await this.app.vault.adapter.write(path, content);
+    new import_obsidian31.Notice("\u5DF2\u751F\u6210\u4E8B\u5B9E\u6F14\u5316\u65F6\u95F4\u7EBF\uFF08.sediment/evolution-timeline.md\uFF09");
+  }
+  async ensureSedimentFolder() {
+    try {
+      await this.app.vault.adapter.mkdir(this.folderName);
+    } catch (e) {
+    }
   }
 };
 
@@ -11435,6 +12806,9 @@ var SedimentIndicator2 = class {
   constructor(statusBarItem) {
     this.onClickCb = null;
     this.state = "idle";
+    this.veinCount = 0;
+    this.wormholeCount = 0;
+    this.hybridCount = 0;
     this.el = statusBarItem;
     this.el.addClass("sediment-status-bar");
     this.setState("idle");
@@ -11449,6 +12823,19 @@ var SedimentIndicator2 = class {
     this.state = "conflict";
     this.el.setText(I18N.statusBarConflict(n));
   }
+  /** 展示矿脉数量 */
+  setVeinCount(n) {
+    this.veinCount = n;
+    this.el.setText(`\u77FF\u8109 ${n}`);
+  }
+  /** 完整 💎 态：化石 + 断层 + 矿脉（+ 虫洞 + 灵感） */
+  setCounts(fossil, fault, vein, wormhole = 0, hybrid = 0) {
+    this.state = fault > 0 ? "conflict" : "idle";
+    this.veinCount = vein;
+    this.wormholeCount = wormhole;
+    this.hybridCount = hybrid;
+    this.el.setText(I18N.statusBarFull(fossil, fault, vein, wormhole, hybrid));
+  }
   /** 重置为默认活跃状态（"沉积层活跃"） */
   setState(state) {
     this.state = state;
@@ -11456,9 +12843,16 @@ var SedimentIndicator2 = class {
       this.el.setText(I18N.statusBarIdle);
     }
   }
-  /** 总开关关闭时隐藏状态栏项，开启时恢复 */
+  /** 总开关关闭时显示"已关闭"灰显提示（而非隐藏），让用户区分"没开"与"开了但没沉积" */
   setEnabled(enabled) {
-    this.el.style.display = enabled ? "" : "none";
+    this.el.style.display = "";
+    this.el.style.opacity = enabled ? "" : "0.5";
+    if (enabled) {
+      this.el.removeClass("sediment-disabled");
+    } else {
+      this.el.addClass("sediment-disabled");
+      this.el.setText("\u{1FAA8} \u6C89\u79EF\u5C42\u5DF2\u5173\u95ED");
+    }
   }
   /** 注册点击事件回调 */
   onClick(callback) {
@@ -11470,12 +12864,210 @@ var SedimentIndicator2 = class {
   }
 };
 
+// src/sediment/ui/fault-adjudicate-modal.ts
+var import_obsidian32 = require("obsidian");
+var FaultAdjudicateModal = class extends import_obsidian32.Modal {
+  constructor(app, sediment) {
+    super(app);
+    this.sediment = sediment;
+  }
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "\u88C1\u51B3\u65AD\u5C42\uFF08\u5F20\u529B\u547D\u9898\uFF09" });
+    const faults = await this.sediment.getOpenFaults();
+    if (faults.length === 0) {
+      contentEl.createEl("p", { text: "\u5F53\u524D\u6CA1\u6709\u5F85\u89C2\u5BDF\u7684\u65AD\u5C42\u3002" });
+      return;
+    }
+    for (const f of faults) {
+      this.renderFault(contentEl, f);
+    }
+  }
+  renderFault(container, f) {
+    new import_obsidian32.Setting(container).setName(f.summary).setDesc(`\u7C7B\u578B\uFF1A${f.kind}`).addButton(
+      (btn) => btn.setButtonText("\u91C7\u7EB3\u4E3A\u5F20\u529B\u547D\u9898").setCta().onClick(async () => {
+        await this.sediment.adjudicateFault(
+          f.id,
+          `\u5173\u4E8E\u300C${f.summary}\u300D\u5B58\u5728\u4E24\u79CD\u53D6\u5411\u7684\u5F20\u529B`,
+          f.summary
+        );
+        this.onOpen();
+      })
+    ).addButton(
+      (btn) => btn.setButtonText("\u5FFD\u7565").onClick(async () => {
+        await this.sediment.dismissFault(f.id);
+        this.onOpen();
+      })
+    );
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/sediment/ui/mark-insightful-modal.ts
+var import_obsidian33 = require("obsidian");
+var MarkInsightfulModal = class extends import_obsidian33.Modal {
+  constructor(app, sediment) {
+    super(app);
+    this.sediment = sediment;
+  }
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "\u6807\u8BB0\u6D1E\u89C1 / \u5347\u6743\u77FF\u8109" });
+    const veins = await this.sediment.getUnconfirmedVeins();
+    if (veins.length === 0) {
+      contentEl.createEl("p", { text: "\u5F53\u524D\u6CA1\u6709\u5F85\u5347\u6743\u7684\u77FF\u8109\u3002" });
+      return;
+    }
+    for (const v of veins) {
+      new import_obsidian33.Setting(contentEl).setName(v.label).addButton(
+        (btn) => btn.setButtonText("\u786E\u8BA4\u5347\u6743").setCta().onClick(async () => {
+          await this.sediment.confirmVein(v.id);
+          this.onOpen();
+        })
+      );
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/sediment/ui/wormhole-modal.ts
+var import_obsidian34 = require("obsidian");
+var REL_LABEL2 = {
+  contradiction: "\u77DB\u76FE",
+  resonance: "\u547C\u5E94",
+  evolution: "\u6F14\u5316"
+};
+var WormholeHitsModal = class extends import_obsidian34.Modal {
+  constructor(app, sediment) {
+    super(app);
+    this.sediment = sediment;
+  }
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "\u{1FAB1} \u866B\u6D1E\uFF1A\u8BB0\u5FC6\u5BF9\u7167" });
+    const hits = await this.sediment.loadWormholeHits();
+    if (!hits.length) {
+      contentEl.createEl("p", {
+        text: "\u6682\u65E0\u866B\u6D1E\u5BF9\u7167\u8BB0\u5F55\u3002\u5F00\u542F\u300C\u5B9E\u65F6\u866B\u6D1E\u300D\u540E\u7F16\u8F91\u7B14\u8BB0\u4F1A\u81EA\u52A8\u4EA7\u751F\u5BF9\u7167\u3002"
+      });
+      return;
+    }
+    for (const h of hits) {
+      const box = contentEl.createDiv("wormhole-hit");
+      box.createEl("div", {
+        text: `\u3010${REL_LABEL2[h.relation] || h.relation}\u3011${h.explanation}`,
+        cls: "wormhole-rel"
+      });
+      box.createEl("div", { text: `\u7B14\u8BB0\uFF1A${h.note_excerpt}`, cls: "wormhole-excerpt" });
+      box.createEl("div", {
+        text: `\u6C89\u79EF\u5C42\uFF1A${h.sediment_excerpt}`,
+        cls: "wormhole-excerpt"
+      });
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/sediment/ui/hybrid-insight-modal.ts
+var import_obsidian35 = require("obsidian");
+var HybridInsightModal = class extends import_obsidian35.Modal {
+  constructor(app, sediment) {
+    super(app);
+    this.sediment = sediment;
+  }
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "\u{1F4A1} \u8BA4\u77E5\u6742\u4EA4\uFF1A\u786E\u8BA4\u7075\u611F\u5347\u6743" });
+    const list = await this.sediment.getUnconfirmedHybrids();
+    if (!list.length) {
+      contentEl.createEl("p", {
+        text: "\u5F53\u524D\u6CA1\u6709\u5F85\u786E\u8BA4\u7684\u7075\u611F\u6742\u4EA4\u3002\u53EF\u7528\u547D\u4EE4\u300C\u5F3A\u5236\u7075\u611F\u5173\u8054\u300D\u751F\u6210\u3002"
+      });
+      return;
+    }
+    for (const it of list) {
+      const box = contentEl.createDiv("hybrid-item");
+      box.createEl("div", { text: it.title, cls: "hybrid-title" });
+      box.createEl("div", { text: it.synthesis, cls: "hybrid-synthesis" });
+      new import_obsidian35.Setting(box).setName("\u6807\u300C\u6709\u542F\u53D1\u300D\u5347\u6743").addButton(
+        (btn) => btn.setButtonText("\u786E\u8BA4\u5347\u6743").setCta().onClick(async () => {
+          await this.sediment.confirmHybrid(it.id);
+          new import_obsidian35.Notice("\u7075\u611F\u5DF2\u5347\u6743");
+          await this.onOpen();
+        })
+      );
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/sediment/migrate.ts
+var import_obsidian36 = require("obsidian");
+function migrateFromV1(app, _settings) {
+  try {
+    const dir = (0, import_obsidian36.normalizePath)(".sediment/bedrock");
+    void (async () => {
+      try {
+        const listing = await app.vault.adapter.list(dir);
+        for (const f of listing.files) {
+          try {
+            const raw = await app.vault.adapter.read(f);
+            const m = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
+            if (!m)
+              continue;
+            const lines = m[1].split("\n");
+            const hasTension = lines.some((l) => l.trimStart().startsWith("tension:"));
+            const hasWeight = lines.some((l) => l.trimStart().startsWith("weight:"));
+            const hasStatus = lines.some((l) => l.trimStart().startsWith("status:"));
+            if (hasTension && hasWeight && hasStatus)
+              continue;
+            const assertionLine = lines.find((l) => l.trimStart().startsWith("assertion:"));
+            const assertion = assertionLine ? assertionLine.split(":").slice(1).join(":").trim() : "";
+            const patch = [];
+            if (!hasTension)
+              patch.push(`tension: ${assertion || "\uFF08\u672A\u77E5\u5F20\u529B\uFF09"}`);
+            if (!hasStatus)
+              patch.push(`status: open`);
+            if (!hasWeight)
+              patch.push(`weight: ${BEDROCK_LOW_WEIGHT}`);
+            if (patch.length === 0)
+              continue;
+            const newFm = `---
+${lines.join("\n")}
+${patch.join("\n")}
+---
+`;
+            const body = raw.slice(m[0].length);
+            await app.vault.adapter.write(f, newFm + body);
+          } catch (e) {
+          }
+        }
+      } catch (e) {
+      }
+    })();
+  } catch (e) {
+    console.warn("[sediment] migrateFromV1 skipped:", e);
+  }
+}
+
 // main.ts
-var import_obsidian25 = require("obsidian");
+var import_obsidian37 = require("obsidian");
 init_AiAssistantModal();
 init_i18n();
 init_tools();
-var LLMChatPlugin = class extends import_obsidian25.Plugin {
+var LLMChatPlugin = class extends import_obsidian37.Plugin {
   constructor() {
     super(...arguments);
     this.chatView = null;
@@ -11490,6 +13082,7 @@ var LLMChatPlugin = class extends import_obsidian25.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    migrateFromV1(this.app, this.settings);
     this.mcpManager = new McpManager6(this.app);
     this.memoryManager = new MemoryManager4(this.app, this.settings);
     const sedimentStatusBar = this.addStatusBarItem();
@@ -11498,8 +13091,11 @@ var LLMChatPlugin = class extends import_obsidian25.Plugin {
       folderName: this.settings.sedimentFolderName,
       deviceName: "default",
       isEnabled: () => this.settings.enableSediment,
-      isBriefingEnabled: () => this.settings.enableSedimentBriefing
+      isBriefingEnabled: () => this.settings.enableSedimentBriefing,
+      settings: this.settings
     });
+    this.sedimentManager.updateSettings(this.settings);
+    this.sedimentManager.setAnalysisEnabled(this.settings.enableSedimentAnalysis);
     this.registerView(CHAT_VIEW_TYPE, (leaf) => {
       this.chatView = new ChatView2(
         leaf,
@@ -11578,13 +13174,107 @@ var LLMChatPlugin = class extends import_obsidian25.Plugin {
         if (!this.sedimentManager)
           return;
         await this.sedimentManager.rebuildIndex();
-        new import_obsidian25.Notice("\u6C89\u79EF\u5C42\u7D22\u5F15\u5DF2\u91CD\u5EFA");
+        await this.sedimentManager.recomputeDerivedState();
+        new import_obsidian37.Notice("\u6C89\u79EF\u5C42\u7D22\u5F15\u5DF2\u91CD\u5EFA");
+      }
+    });
+    this.addCommand({
+      id: "trigger-sediment-analysis",
+      name: "\u8FD0\u884C\u6C89\u79EF\u5C42\u6DF1\u5EA6\u5206\u6790",
+      callback: async () => {
+        if (!this.sedimentManager)
+          return;
+        await this.sedimentManager.runAnalysisPass();
+        new import_obsidian37.Notice("\u6C89\u79EF\u5C42\u6DF1\u5EA6\u5206\u6790\u5DF2\u8FD0\u884C");
+      }
+    });
+    this.addCommand({
+      id: "adjudicate-fault",
+      name: "\u88C1\u51B3\u65AD\u5C42",
+      callback: () => {
+        if (!this.sedimentManager)
+          return;
+        new FaultAdjudicateModal(this.app, this.sedimentManager).open();
+      }
+    });
+    this.addCommand({
+      id: "mark-insightful",
+      name: "\u6807\u8BB0\u6D1E\u89C1 / \u5347\u6743\u77FF\u8109",
+      callback: () => {
+        if (!this.sedimentManager)
+          return;
+        new MarkInsightfulModal(this.app, this.sedimentManager).open();
+      }
+    });
+    this.addCommand({
+      id: "force-insight-association",
+      name: "\u5F3A\u5236\u7075\u611F\u5173\u8054\uFF08\u8BA4\u77E5\u6742\u4EA4\uFF09",
+      callback: async () => {
+        if (!this.sedimentManager)
+          return;
+        await this.sedimentManager.runHybridizationPass();
+      }
+    });
+    this.addCommand({
+      id: "confirm-hybrid-insight",
+      name: "\u786E\u8BA4\u7075\u611F\u5347\u6743\uFF08\u8BA4\u77E5\u6742\u4EA4\uFF09",
+      callback: () => {
+        if (!this.sedimentManager)
+          return;
+        new HybridInsightModal(this.app, this.sedimentManager).open();
+      }
+    });
+    this.addCommand({
+      id: "run-sediment-compaction",
+      name: "\u8FD0\u884C\u6C89\u79EF\u5C42\u538B\u5B9E",
+      callback: async () => {
+        if (!this.sedimentManager)
+          return;
+        await this.sedimentManager.runCompactionPass();
+        new import_obsidian37.Notice("\u6C89\u79EF\u5C42\u538B\u5B9E\u5DF2\u8FD0\u884C");
+      }
+    });
+    this.addCommand({
+      id: "open-wormhole-hits",
+      name: "\u67E5\u770B\u866B\u6D1E\u5BF9\u7167",
+      callback: () => {
+        if (!this.sedimentManager)
+          return;
+        new WormholeHitsModal(this.app, this.sedimentManager).open();
+      }
+    });
+    this.addCommand({
+      id: "invalidate-memory",
+      name: "\u4F7F\u5F53\u524D\u753B\u50CF\u8BB0\u5FC6\u5931\u6548",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new import_obsidian37.Notice("\u8BF7\u5148\u6253\u5F00\u4E00\u6761\u753B\u50CF\u8BB0\u5FC6\u6587\u4EF6\uFF08memory/profile/ \u4E0B\uFF09");
+          return;
+        }
+        if (!this.memoryManager)
+          return;
+        const ok = await this.memoryManager.markExpired(file.path);
+        new import_obsidian37.Notice(ok ? "\u8BE5\u753B\u50CF\u5DF2\u6807\u8BB0\u4E3A\u5931\u6548\uFF08\u4E0D\u518D\u6CE8\u5165\u4E0A\u4E0B\u6587\uFF0C\u78C1\u76D8\u4FDD\u7559\uFF09" : "\u6807\u8BB0\u5931\u8D25\uFF1A\u8BE5\u6587\u4EF6\u4E0D\u662F\u53EF\u8BFB\u8BB0\u5FC6\u6587\u4EF6");
+      }
+    });
+    this.addCommand({
+      id: "sediment-evolution-timeline",
+      name: "\u751F\u6210\u6C89\u79EF\u5C42\u4E8B\u5B9E\u6F14\u5316\u65F6\u95F4\u7EBF",
+      callback: async () => {
+        if (!this.sedimentManager)
+          return;
+        await this.sedimentManager.generateEvolutionTimeline();
       }
     });
     this.registerEvent(
       this.app.workspace.on("layout-ready", () => {
-        var _a;
+        var _a, _b, _c;
         (_a = this.sedimentManager) == null ? void 0 : _a.tryGenerateBriefing();
+        if (this.settings.enableSedimentAnalysis) {
+          void ((_b = this.sedimentManager) == null ? void 0 : _b.runAnalysisPass());
+        }
+        void ((_c = this.sedimentManager) == null ? void 0 : _c.loadWormholeHits());
       })
     );
     this.registerEvent(
@@ -11647,6 +13337,7 @@ var LLMChatPlugin = class extends import_obsidian25.Plugin {
       this.mcpManager = null;
     }
     if (this.sedimentManager) {
+      this.sedimentManager.onunload();
       this.sedimentManager = null;
     }
     if (this.selectionToolbar) {

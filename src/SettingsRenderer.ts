@@ -832,29 +832,11 @@ export class SettingsRenderer {
     container.createEl("p", { text: this.str("settingsMemoryDesc"), cls: "setting-item-description" });
 
     new Setting(container)
-      .setName(this.str("settingsEnableRecentConversations"))
-      .setDesc(this.str("settingsEnableRecentConversationsDesc"))
-      .addToggle((t) =>
-        t.setValue(this.settings.enableRecentConversations)
-          .onChange(async (v) => { this.settings.enableRecentConversations = v; await this.save(); })
-      );
-
-    new Setting(container)
-      .setName(this.str("settingsMaxRecentConversations"))
-      .setDesc(this.str("settingsMaxRecentConversationsDesc"))
-      .addSlider((s) =>
-        s.setLimits(1, 20, 1)
-          .setValue(this.settings.maxRecentConversations)
-          .setDynamicTooltip()
-          .onChange(async (v) => { this.settings.maxRecentConversations = v; await this.save(); })
-      );
-
-    new Setting(container)
       .setName(this.str("settingsEnableSavedMemory"))
       .setDesc(this.str("settingsEnableSavedMemoryDesc"))
       .addToggle((t) =>
-        t.setValue(this.settings.enableSavedMemory)
-          .onChange(async (v) => { this.settings.enableSavedMemory = v; await this.save(); })
+        t.setValue(this.settings.enableMemory)
+          .onChange(async (v) => { this.settings.enableMemory = v; await this.save(); })
       );
 
     new Setting(container)

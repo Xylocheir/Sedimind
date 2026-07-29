@@ -68,6 +68,11 @@ export class IndexManager {
     }
   }
 
+  /** 返回内存缓存的全部条目（供投影/排序/注入使用） */
+  getAll(): SedimentIndexEntry[] {
+    return this.cache;
+  }
+
   /** 极简 YAML 解析：仅处理 `key: value`（值可为数字或字符串） */
   private parseFrontmatter(raw: string): Record<string, unknown> {
     const m = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
@@ -147,6 +152,9 @@ export class IndexManager {
           source_file: f,
           citation_count: 0,
           retrieval_count: 0,
+          facies: (fm.facies as SedimentIndexEntry["facies"]) || undefined,
+          stance: (fm.stance as SedimentIndexEntry["stance"]) || undefined,
+          cross_cutting: Array.isArray(fm.cross_cutting) ? (fm.cross_cutting as string[]) : [],
         });
       } catch {
         // 跳过解析失败的文件

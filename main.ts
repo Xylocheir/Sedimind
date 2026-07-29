@@ -11,6 +11,11 @@ import { MemoryManager } from "./src/memory/MemoryManager";
 import { SedimentManager } from "./src/sediment/SedimentManager";
 import { SedimentIndicator } from "./src/sediment/status-bar/sediment-indicator";
 import { setExternalTools } from "./src/tools/index";
+import { FaultAdjudicateModal } from "./src/sediment/ui/fault-adjudicate-modal";
+import { MarkInsightfulModal } from "./src/sediment/ui/mark-insightful-modal";
+import { WormholeHitsModal } from "./src/sediment/ui/wormhole-modal";
+import { HybridInsightModal } from "./src/sediment/ui/hybrid-insight-modal";
+import { migrateFromV1 } from "./src/sediment/migrate";
 
 export default class LLMChatPlugin extends Plugin {
   settings: LLMChatSettings;
@@ -27,6 +32,7 @@ export default class LLMChatPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    migrateFromV1(this.app, this.settings);
 
     // 初始化 MCP 管理器
     this.mcpManager = new McpManager(this.app);
@@ -40,7 +46,10 @@ export default class LLMChatPlugin extends Plugin {
       deviceName: "default",
       isEnabled: () => this.settings.enableSediment,
       isBriefingEnabled: () => this.settings.enableSedimentBriefing,
+      settings: this.settings,
     });
+    this.sedimentManager.updateSettings(this.settings);
+    this.sedimentManager.setAnalysisEnabled(this.settings.enableSedimentAnalysis);
 
     // 注册视图
     this.registerView(CHAT_VIEW_TYPE, (leaf: WorkspaceLeaf) => {
@@ -126,7 +135,106 @@ export default class LLMChatPlugin extends Plugin {
       callback: async () => {
         if (!this.sedimentManager) return;
         await this.sedimentManager.rebuildIndex();
+        await this.sedimentManager.recomputeDerivedState();
         new Notice("沉积层索引已重建");
+      },
+    });
+
+    // 注册命令：立即运行沉积层深度分析
+    this.addCommand({
+      id: "trigger-sediment-analysis",
+      name: "运行沉积层深度分析",
+      callback: async () => {
+        if (!this.sedimentManager) return;
+        await this.sedimentManager.runAnalysisPass();
+        new Notice("沉积层深度分析已运行");
+      },
+    });
+
+    // 注册命令：裁决断层（张力命题）
+    this.addCommand({
+      id: "adjudicate-fault",
+      name: "裁决断层",
+      callback: () => {
+        if (!this.sedimentManager) return;
+        new FaultAdjudicateModal(this.app, this.sedimentManager).open();
+      },
+    });
+
+    // 注册命令：标记洞见 / 升权矿脉
+    this.addCommand({
+      id: "mark-insightful",
+      name: "标记洞见 / 升权矿脉",
+      callback: () => {
+        if (!this.sedimentManager) return;
+        new MarkInsightfulModal(this.app, this.sedimentManager).open();
+      },
+    });
+
+    // 注册命令：认知杂交（Phase 3 强制灵感关联）
+    this.addCommand({
+      id: "force-insight-association",
+      name: "强制灵感关联（认知杂交）",
+      callback: async () => {
+        if (!this.sedimentManager) return;
+        await this.sedimentManager.runHybridizationPass();
+      },
+    });
+
+    // 注册命令：确认灵感升权（Phase 3）
+    this.addCommand({
+      id: "confirm-hybrid-insight",
+      name: "确认灵感升权（认知杂交）",
+      callback: () => {
+        if (!this.sedimentManager) return;
+        new HybridInsightModal(this.app, this.sedimentManager).open();
+      },
+    });
+
+    // 注册命令：运行沉积层压实（Phase 3）
+    this.addCommand({
+      id: "run-sediment-compaction",
+      name: "运行沉积层压实",
+      callback: async () => {
+        if (!this.sedimentManager) return;
+        await this.sedimentManager.runCompactionPass();
+        new Notice("沉积层压实已运行");
+      },
+    });
+
+    // 注册命令：查看虫洞对照（Phase 3）
+    this.addCommand({
+      id: "open-wormhole-hits",
+      name: "查看虫洞对照",
+      callback: () => {
+        if (!this.sedimentManager) return;
+        new WormholeHitsModal(this.app, this.sedimentManager).open();
+      },
+    });
+
+    // 注册命令：使当前画像记忆失效（借 MemPalace 时序 invalidate）
+    this.addCommand({
+      id: "invalidate-memory",
+      name: "使当前画像记忆失效",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new Notice("请先打开一条画像记忆文件（memory/profile/ 下）");
+          return;
+        }
+        if (!this.memoryManager) return;
+        const ok = await this.memoryManager.markExpired(file.path);
+        new Notice(ok ? "该画像已标记为失效（不再注入上下文，磁盘保留）" : "标记失败：该文件不是可读记忆文件");
+      },
+    });
+
+    // 注册命令：生成沉积层事实演化时间线（借 MemPalace 时序知识图）
+    this.addCommand({
+      id: "sediment-evolution-timeline",
+      name: "生成沉积层事实演化时间线",
+      callback: async () => {
+        if (!this.sedimentManager) return;
+        await this.sedimentManager.generateEvolutionTimeline();
       },
     });
 
@@ -134,6 +242,11 @@ export default class LLMChatPlugin extends Plugin {
     this.registerEvent(
       (this.app.workspace.on as any)("layout-ready", () => {
         this.sedimentManager?.tryGenerateBriefing();
+        if (this.settings.enableSedimentAnalysis) {
+          void this.sedimentManager?.runAnalysisPass();
+        }
+        // 加载虫洞对照记录，刷新状态栏 🪱 计数
+        void this.sedimentManager?.loadWormholeHits();
       })
     );
 
@@ -205,6 +318,7 @@ export default class LLMChatPlugin extends Plugin {
     }
     // 清理沉积层引用
     if (this.sedimentManager) {
+      this.sedimentManager.onunload();
       this.sedimentManager = null;
     }
     if (this.selectionToolbar) {

@@ -50,7 +50,7 @@ LLM 不只是生成文本，而是真正操作你的笔记。全部由模型自�
 
 ### 3. 多模型 Provider，本地优先
 
-OpenAI、Anthropic、DeepSeek、Ollama、Gemini，以及 Claude Code / Codex 的 CLI 模式。**Ollama 模式下数据完全本地、零网络请求。**
+OpenAI、Anthropic、DeepSeek、Ollama、Gemini，以及本地 CLI 模式。**Ollama 模式下数据完全本地、零网络请求。**
 
 ### 4. MCP 扩展
 
@@ -70,18 +70,13 @@ OpenAI、Anthropic、DeepSeek、Ollama、Gemini，以及 Claude Code / Codex 的
 
 ---
 
-## 🧩 与同类插件的差异
+## 📌 本次迭代亮点（v1.1.0）
 
-| 维度 | Sedimind | Claudian | Copilot |
-|------|-------------------|----------|---------|
-| 核心定位 | 笔记操作助手 + 沉积层 | 把编码 Agent 搬进 Vault | 通用 Copilot + 语义检索 |
-| 文件操作 | 工具直接读写 | 由 CLI Agent 完成 | Agent 工具写入 |
-| 碎片化记录 | **sediment 沉积层（原创）** | 无 | 无专门机制 |
-| 本地模型 | Ollama 原生 | 依赖外部 CLI | Ollama 支持 |
-| 语义检索 | 工具级检索 | 无 | 核心能力（向量索引） |
-| 运行方式 | 调用 LLM API / CLI | 依赖本地 CLI Agent | 调用 LLM API |
+- **问题反馈模块**：设置页新增「问题反馈」Tab（Bug / 功能建议 / 其他），支持最多 5 张截图 + 可选联系邮箱，经私有 Supabase 端点上报（insert-only RLS，不上传其他本地数据）。
+- **7 语言反馈文案**（中 / 英 / 日 / 韩 / 德 / 法 / 西）。
+- **设置面板扩展为六栏**（通用 / 模型管理 / MCP / 记忆 / 快捷键 / 问题反馈）。
 
-> 设计上参考了对 Claudian、Copilot 的竞品拆解（见 [Claudian_Copilot_竞品分析.md](docs/Claudian_Copilot_竞品分析.md)），吸收其模型管理、RAG、记忆等优点。
+完整更新历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -114,7 +109,7 @@ npm run build    # 生产构建
 
 TypeScript + esbuild，基于 Obsidian API。主要模块：
 
-- `src/llm/`：多模型 Provider（OpenAI / Ollama / Anthropic / DeepSeek / Gemini / Claude Code / Codex）
+- `src/llm/`：多模型 Provider（OpenAI / Ollama / Anthropic / DeepSeek / Gemini，以及本地 CLI 模式）
 - `src/tools/`：笔记操作工具集
 - `src/memory/`：记忆管理器
 - `src/mcp/`：MCP 客户端与管理器

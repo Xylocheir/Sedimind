@@ -199,6 +199,17 @@ export class LLMChatSettingsTab extends PluginSettingTab {
         sysText = text;
       });
 
+    // 工具调用上限（学 Copilot Max Iterations：防止死循环，可配置 + 即时生效）
+    new Setting(container)
+      .setName("工具调用最大轮数")
+      .setDesc("模型单次回答中最多连续调用工具的次数。过低易提前停止，过高可能空转浪费轮次。默认 15。改动即时生效。")
+      .addSlider((s) =>
+        s.setLimits(5, 50, 1)
+          .setValue(this.settings.maxToolIterations)
+          .setDynamicTooltip()
+          .onChange(async (v) => { this.settings.maxToolIterations = v; await this.save(); })
+      );
+
     // 划词工具栏：总开关
     container.createEl("h3", { text: "划词工具栏" });
     new Setting(container)
@@ -629,32 +640,13 @@ export class LLMChatSettingsTab extends PluginSettingTab {
     container.createEl("h3", { text: this.str("settingsMemoryTitle") });
     container.createEl("p", { text: this.str("settingsMemoryDesc"), cls: "setting-item-description" });
 
-    // 近期对话记忆
-    new Setting(container)
-      .setName(this.str("settingsEnableRecentConversations"))
-      .setDesc(this.str("settingsEnableRecentConversationsDesc"))
-      .addToggle((t) =>
-        t.setValue(this.settings.enableRecentConversations)
-          .onChange(async (v) => { this.settings.enableRecentConversations = v; await this.save(); })
-      );
-
-    new Setting(container)
-      .setName(this.str("settingsMaxRecentConversations"))
-      .setDesc(this.str("settingsMaxRecentConversationsDesc"))
-      .addSlider((s) =>
-        s.setLimits(1, 20, 1)
-          .setValue(this.settings.maxRecentConversations)
-          .setDynamicTooltip()
-          .onChange(async (v) => { this.settings.maxRecentConversations = v; await this.save(); })
-      );
-
     // 保存记忆
     new Setting(container)
       .setName(this.str("settingsEnableSavedMemory"))
       .setDesc(this.str("settingsEnableSavedMemoryDesc"))
       .addToggle((t) =>
-        t.setValue(this.settings.enableSavedMemory)
-          .onChange(async (v) => { this.settings.enableSavedMemory = v; await this.save(); })
+        t.setValue(this.settings.enableMemory)
+          .onChange(async (v) => { this.settings.enableMemory = v; await this.save(); })
       );
 
     new Setting(container)
@@ -664,6 +656,27 @@ export class LLMChatSettingsTab extends PluginSettingTab {
         t.setPlaceholder("llm-chat/memory")
           .setValue(this.settings.memoryFolderName)
           .onChange(async (v) => { this.settings.memoryFolderName = v; await this.save(); })
+      );
+
+    new Setting(container)
+      .setName("记忆召回协议（实时注入）")
+      .setDesc("开启后，注入用户记忆前强制附带「回答前必须先参考用户长期记忆」指令，避免 AI 凭空杜撰用户情况（借 MemPalace recall-protocol）。默认开启，改动即时生效。")
+      .addToggle((t) =>
+        t.setValue(this.settings.forceMemoryRecall)
+          .onChange(async (v) => { this.settings.forceMemoryRecall = v; await this.save(); })
+      );
+
+    new Setting(container)
+      .setName("画像自动失效天数")
+      .setDesc("超过该天数的 profile 不再注入上下文（磁盘仍保留，可在文件 frontmatter 加 active_until 单独控制，或用「使当前画像记忆失效」命令手动作废）。0=永不自动失效。改动即时生效。")
+      .addText((t) =>
+        t.setPlaceholder("0")
+          .setValue(String(this.settings.memoryProfileMaxAgeDays))
+          .onChange(async (v) => {
+            const n = parseInt(v, 10);
+            this.settings.memoryProfileMaxAgeDays = isNaN(n) || n < 0 ? 0 : n;
+            await this.save();
+          })
       );
 
     // ====== 沉积层（Phase 1）======
@@ -692,12 +705,80 @@ export class LLMChatSettingsTab extends PluginSettingTab {
       );
 
     new Setting(container)
+      .setName("沉积层深度分析（Phase 2）")
+      .setDesc("关闭=仅被动沉积（Phase 1 行为）。开启=额外运行变质 / 断层 / 矿脉 / 反差注入 / 每日衰减（Phase 2）。默认关闭（隐私与性能默认最大）。")
+      .addToggle((t) =>
+        t.setValue(this.settings.enableSedimentAnalysis)
+          .onChange(async (v) => {
+            this.settings.enableSedimentAnalysis = v;
+            await this.save();
+            this.sedimentManager?.setAnalysisEnabled?.(v);
+            this.sedimentManager?.updateSettings?.(this.settings);
+            // 重渲染设置页：解锁依赖深度分析的「实时虫洞」开关，免去手动重开设置页
+            this.display();
+          })
+      );
+
+    new Setting(container)
       .setName("沉积层文件夹")
       .setDesc("沉积物存放根目录（相对于 vault 根目录）。默认 .sediment。")
       .addText((t) =>
         t.setPlaceholder(".sediment")
           .setValue(this.settings.sedimentFolderName)
           .onChange(async (v) => { this.settings.sedimentFolderName = v; await this.save(); })
+      );
+
+    // --- Phase 3 主动进化 ---
+    const analysisOn = this.settings.enableSedimentAnalysis;
+
+    new Setting(container)
+      .setName("实时虫洞（Phase 3）")
+      .setDesc("开启后，编辑 vault 笔记时后台语义比对沉积层，弹窗提示「矛盾/呼应/演化」对照。默认关闭（每次编辑触发 LLM，较费 token）。需先开启「沉积层深度分析」。")
+      .addToggle((t) =>
+        t
+          .setValue(this.settings.enableSedimentWormhole)
+          .setDisabled(!analysisOn)
+          .onChange(async (v) => {
+            this.settings.enableSedimentWormhole = v;
+            await this.save();
+          })
+      );
+
+    new Setting(container)
+      .setName("周期性压实间隔（天）")
+      .setDesc("每隔 N 天自动把足够老的化石压实成独立派生摘要。在深度分析 pass 中自动运行。")
+      .addSlider((s) =>
+        s
+          .setLimits(7, 90, 1)
+          .setValue(this.settings.sedimentCompactionDays)
+          .setDynamicTooltip()
+          .onChange(async (v) => {
+            this.settings.sedimentCompactionDays = v;
+            await this.save();
+          })
+      );
+
+    new Setting(container)
+      .setName("压实最旧化石年龄（天）")
+      .setDesc("只有早于 M 天的化石才会参与压实（默认 90 天）。")
+      .addSlider((s) =>
+        s
+          .setLimits(30, 365, 1)
+          .setValue(this.settings.sedimentCompactionMinAgeDays)
+          .setDynamicTooltip()
+          .onChange(async (v) => {
+            this.settings.sedimentCompactionMinAgeDays = v;
+            await this.save();
+          })
+      );
+
+    new Setting(container)
+      .setName("认知杂交（Phase 3）")
+      .setDesc("命令「强制灵感关联」：取 >30 天的旧化石随机 2~3 条做受控灵感杂交，默认低权；需在「确认灵感升权」弹窗标「有启发」才升权，防自我污染。")
+      .addButton((b) =>
+        b.setButtonText("强制灵感关联").onClick(async () => {
+          await this.sedimentManager?.runHybridizationPass?.();
+        })
       );
   }
 

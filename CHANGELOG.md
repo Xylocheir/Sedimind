@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-07-30
+
+### Added
+- **沉积层（Sediment）完整子系统（Phase 1–3）**
+  - Phase 1：对话终答自动沉积、重力筛选、L1 化石写入、每日简报、状态栏沉积指标
+  - Phase 2 认知基岩：L1/L2 动态投影（化石不可变）、变质产张力命题、断层线 + 💎 裁决、矿脉聚类、反差注入、存活率/检索排序
+  - Phase 3 主动进化：反差度地质勘探排序、实时虫洞编辑语义比对、受控认知杂交、周期压实（化石不可变，仅标 superseded）、两个弹窗、状态栏 🪱💡 态、4 个命令
+  - 命令：`rebuild-sediment-index`、`layout-ready` 简报等
+- **意识层记忆模块**：`Memory/journal` 每日日志 + `Memory/profile` 长期事实，自动注入对话上下文
+- **问题反馈系统**：Supabase 私有库匿名提交（零配置、内容不泄露、含可选截图）
+- **设置项全部实时生效**：开关 `onChange` 即时刷新受影响的 UI/监听器，无需重开设置页或重载插件
+- **划词工具栏子菜单样式**（连续绿描边胶囊）
+- `ROADMAP.md` 路线图文档
+
+### Changed
+- **插件更名**：显示名与 id 由 `obsidian-llm-chat` → `Sedimind`
+- **发布流程重构**：版本工具 `version-bump.mjs` 改为基于 CHANGELOG `[Unreleased]` 折叠（自动记录 + 上传时定版本号 + tag 全自动）
+
+### Fixed
+- 虫洞开关被锁在深度分析旧快照（需重开设置页才解锁）→ 改为实时读取 settings
+- `create_note` 拍平路径保留层级、文件夹引用键内联
+- 分叉 ID 定位法统一 fork/编辑/删除/重生成
+
 ## [1.1.0] - 2026-07-28
 
 ### Added
@@ -26,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- 多模型支持：OpenAI、Anthropic、Ollama、DeepSeek、Claude Code、Codex
+- 多模型支持：OpenAI、Anthropic、Ollama、DeepSeek，以及本地 CLI 模式
 - 笔记操作工具集：创建、编辑、搜索、读取、列出、删除、移动、元数据查询、系统时间
 - 引用 Chips 系统：@ 符号触发、拖拽文件/文件夹、编辑器选中文字、文件选择器
 - 多标签页对话面板：新建、切换、关闭、重命名标签页

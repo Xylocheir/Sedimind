@@ -15,7 +15,8 @@ import { getAllTools, executeToolCall, setExternalTools } from "../tools/index";
 import { LLMChatSettings } from "../settings";
 import { McpManager } from "../mcp/McpManager";
 import { SedimentManager } from "../sediment/SedimentManager";
-import { MemoryManager, RecentConversation } from "../memory/MemoryManager";
+import { extractAndRoute } from "../sediment/capture-extractor";
+import { MemoryManager } from "../memory/MemoryManager";
 
 export interface UICallbacks {
   onUserMessage: (content: string) => void;
@@ -40,6 +41,7 @@ export class MessageHandler {
   private mcpManager: McpManager | null = null;
   private memoryManager: MemoryManager | null = null;
   private sedimentManager: SedimentManager | null = null;
+  private static sedimentWarnShown = false;
 
   constructor(
     app: App,
@@ -136,22 +138,28 @@ export class MessageHandler {
   private async updateSystemPrompt(): Promise<void> {
     let prompt = this.customSystemPrompt || this.settings.systemPrompt;
 
-    // 注入近期对话记忆
+    // 注入记忆上下文（意识层：近期日记 + 长期画像）
     if (this.memoryManager) {
-      prompt += this.memoryManager.getRecentConversationsContext();
-      const savedMemory = await this.memoryManager.getSavedMemoryContext();
-      if (savedMemory) {
-        prompt += savedMemory;
+      const memoryCtx = await this.memoryManager.getMemoryContext();
+      if (memoryCtx) {
+        prompt += memoryCtx;
       }
     }
 
     // 如果用户要求记住信息，添加记忆保存指令
-    if (this.settings.enableSavedMemory) {
+    if (this.settings.enableMemory) {
 if (this.settings.enableSediment && this.sedimentManager) {
       prompt +=
         `\n\n[沉积层协议] 在给出最终答案之前，请先用 <think> 标签写出你的思考过程，包括你考虑过的不同思路和放弃的理由。\n` +
         `格式：<think>思考内容</think>。这部分不会被用户看到，会被自动剥离并沉积。不要在工具调用中间回合输出 <think>，只在最终回答前输出。\n`;
-      // forage not available yet - sediment layer will be enhanced later
+      if (this.settings.enableSedimentAnalysis) {
+        const ctx = this.sedimentManager.buildInjectionContext();
+        if (ctx && ctx.blocks.length > 0) {
+          const inj = ctx.blocks.map((b) => `- ${b.excerpt}`).join("\n");
+          prompt +=
+            `\n\n[沉积层反差注入] 以下为历史上高存活或相关的沉积片段，供你参考或刻意与之对照（它们可能已过时，请自行判断）：\n${inj}\n`;
+        }
+      }
     }
 
 
@@ -183,17 +191,6 @@ if (this.settings.enableSediment && this.sedimentManager) {
   appendMessage(role: ChatMessage["role"], content: string): void {
     this.messages.push({ role, content });
     this.trimHistory();
-  }
-
-  /** 保存对话摘要到记忆系统 */
-  async saveConversationSummary(title: string): Promise<void> {
-    if (!this.memoryManager) return;
-    const summary = this.memoryManager.generateSummary(this.messages);
-    await this.memoryManager.saveRecentConversation(
-      `conv_${Date.now()}`,
-      title,
-      summary
-    );
   }
 
   async sendMessage(userContent: string): Promise<void> {
@@ -233,8 +230,17 @@ if (this.settings.enableSediment && this.sedimentManager) {
   }
 
   private async runConversationLoop(): Promise<void> {
+    // 上限可配置（学 Copilot Max Iterations），默认 10 兜底
+    const maxIterations = this.settings.maxToolIterations || 10;
+
     let iteration = 0;
-    const maxIterations = 10; // 防止无限循环
+    let stoppedReason: string | null = null;
+
+    const userText = this.messages.filter((m) => m.role === "user").pop()?.content || "";
+
+    // 防死循环：重复调用检测 + 失败熔断（学 Claudian 错误自纠 / Copilot 工具开关）
+    const callHistory: string[] = [];
+    const failStreak: Record<string, number> = {};
 
     while (iteration < maxIterations) {
       iteration++;
@@ -263,6 +269,8 @@ if (this.settings.enableSediment && this.sedimentManager) {
       // 如果没有工具调用，结束循环
       if (!response.tool_calls || response.tool_calls.length === 0) {
         this.ui.onAssistantMessage(response.content);
+        // 后台自动蒸馏本轮对话要点写入日记（fire-and-forget，不阻塞用户）
+        void this.extractAndRoute(userText, response.content);
         return;
       }
 
@@ -278,6 +286,14 @@ if (this.settings.enableSediment && this.sedimentManager) {
         }
 
         this.ui.onToolCall(name, args);
+
+        // 重复调用检测：连续两次 name+args 完全一致视为无进展，提前停止
+        const sig = name + "::" + JSON.stringify(args);
+        if (callHistory.length && callHistory[callHistory.length - 1] === sig) {
+          stoppedReason = `检测到工具「${name}」被反复调用且未产生进展，已提前停止以避免死循环。请检查该工具实现，或简化你的请求。`;
+          break;
+        }
+        callHistory.push(sig);
 
         // 处理 save_memory 工具（记忆系统内置）
         if (name === "save_memory" && this.memoryManager) {
@@ -312,13 +328,91 @@ if (this.settings.enableSediment && this.sedimentManager) {
           content: result,
         });
         this.trimHistory();
+
+        // 失败熔断：同一工具本轮连续报错 ≥3 次则停（其余功能正常）
+        if (result.startsWith("执行工具") || result.startsWith("错误：")) {
+          failStreak[name] = (failStreak[name] || 0) + 1;
+          if (failStreak[name] >= 3) {
+            stoppedReason = `工具「${name}」连续 ${failStreak[name]} 次调用失败，已停止调用以免浪费轮次。其余功能正常——请检查该工具实现或配置后重试。`;
+            break;
+          }
+        } else {
+          failStreak[name] = 0;
+        }
       }
 
-      // 继续循环，让 LLM 处理工具结果
+      // 任一熔断条件触发即退出循环
+      if (stoppedReason) break;
     }
 
-    if (iteration >= maxIterations) {
-      this.ui.onError("达到最大工具调用次数限制，已停止处理。");
+    if (stoppedReason) {
+      this.ui.onError(stoppedReason);
+    } else if (iteration >= maxIterations) {
+      this.ui.onError(
+        `已达到最大工具调用次数（${maxIterations}）。若模型在反复调用同一工具，请检查该工具或调高「工具调用最大轮数」设置。`
+      );
+    }
+  }
+
+  /** 后台单次调用：抽取认知节点 → 沉积层；抽取稳定事实 → 意识层（机制⑦）。失败静默回退。 */
+  private async extractAndRoute(userText: string, assistantText: string): Promise<void> {
+    if (this.sedimentManager) this.sedimentManager.setProvider(this.provider);
+    const deposit = this.sedimentManager && this.settings.enableSediment;
+    if (!deposit) {
+      await this.extractStableFactsOnly(userText, assistantText);
+      return;
+    }
+    const chatText = `用户说：${userText}\n\n助手回答：${assistantText}`;
+    const result = await extractAndRoute(this.provider, chatText, this.settings);
+    if (!result) {
+      // 沉积失败不再静默：本会话首次给出一次可见提示，避免"沉寂却无感知"
+      if (!MessageHandler.sedimentWarnShown) {
+        MessageHandler.sedimentWarnShown = true;
+        new Notice("沉积层：本次未能抽取认知节点（LLM 调用失败），仅写入日记。请检查 LLM Provider 是否正常。");
+      }
+      console.warn("[sediment] 认知节点抽取失败，本次对话未沉积（已回退仅写日记）");
+      await this.extractStableFactsOnly(userText, assistantText);
+      return;
+    }
+    await this.sedimentManager!.depositTurn(userText, assistantText, result.cognitive_nodes);
+    if (this.memoryManager && this.settings.enableMemory && result.stable_facts.length > 0) {
+      await this.memoryManager.appendJournalEntry(result.stable_facts);
+    }
+    if (this.settings.enableSedimentAnalysis) {
+      void this.sedimentManager!.runAnalysisPass();
+    }
+  }
+
+  /** 仅抽取稳定事实写入意识层日记（Phase 1 兼容回退路径） */
+  private async extractStableFactsOnly(userText: string, assistantText: string): Promise<void> {
+    if (!this.memoryManager || !this.settings.enableMemory) return;
+    const text = (assistantText || "").trim();
+    if (!text) return;
+    try {
+      const sys =
+        "你是一个记忆抽取器。请从下面的对话中，抽出值得长期记住的、关于“用户本人”的稳定事实" +
+        "（如姓名、职业、偏好、重要约定、长期项目、常用工具等）。\n" +
+        "只输出要点，每行一条，以 “- ” 开头。若没有值得记的内容，只输出一个空行。" +
+        "不要复述对话、不要输出任何解释或前后缀。";
+      const resp = await this.provider.chat(
+        [
+          { role: "system", content: sys },
+          { role: "user", content: `用户说：${userText}\n\n助手回答：${assistantText}` },
+        ],
+        [],
+        () => {}
+      );
+      const facts = (resp.content || "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith("- ") && l.length > 2)
+        .map((l) => l.slice(2).trim())
+        .filter((l) => l.length > 0);
+      if (facts.length > 0) {
+        await this.memoryManager.appendJournalEntry(facts);
+      }
+    } catch (e) {
+      console.error("[MemoryManager] auto-extraction failed:", e);
     }
   }
 

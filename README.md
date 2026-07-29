@@ -50,7 +50,7 @@ The LLM doesn't only generate text — it actually operates your notes, deciding
 
 ### 3. Multi-provider, local-first
 
-OpenAI, Anthropic, DeepSeek, Ollama, Gemini, plus Claude Code / Codex CLI modes. **Ollama runs fully local with zero network requests.**
+OpenAI, Anthropic, DeepSeek, Ollama, Gemini, plus a local CLI mode. **Ollama runs fully local with zero network requests.**
 
 ### 4. MCP extension
 
@@ -70,18 +70,13 @@ The settings page gains a new "Feedback" tab where you can submit **Bug / Featur
 
 ---
 
-## 🧩 How it differs from similar plugins
+## 📌 This iteration (v1.1.0)
 
-| Dimension | Sedimind | Claudian | Copilot |
-|-----------|-------------------|----------|---------|
-| Positioning | Note operator + sediment layer | Brings coding Agents into the Vault | General Copilot + semantic search |
-| File ops | Tools read/write directly | Done by CLI Agent | Done by Agent tools |
-| Fragmented records | **sediment layer (original)** | None | No dedicated mechanism |
-| Local models | Native Ollama | Depends on external CLI | Ollama supported |
-| Semantic search | Tool-level retrieval | None | Core capability (vector index) |
-| Runtime | Calls LLM API / CLI | Depends on local CLI Agent | Calls LLM API |
+- **Feedback module**: new "Feedback" settings tab (Bug / Feature / Other) with up to 5 screenshots + optional contact email, reported via a private Supabase endpoint (insert-only RLS, no other local data uploaded).
+- **7-language feedback UI strings** (zh / en / ja / ko / de / fr / es).
+- **Settings panel expanded to six tabs** (General / Models / MCP / Memory / Hotkeys / Feedback).
 
-> The design draws on a competitive teardown of Claudian and Copilot (see [Claudian_Copilot_竞品分析.md](docs/Claudian_Copilot_竞品分析.md)), adopting their strengths in model management, RAG, and memory.
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ---
 
@@ -114,7 +109,7 @@ Place the build artifacts `main.js`, `styles.css`, `manifest.json` into your Vau
 
 TypeScript + esbuild, built on the Obsidian API. Main modules:
 
-- `src/llm/`: multi-model providers (OpenAI / Ollama / Anthropic / DeepSeek / Gemini / Claude Code / Codex)
+- `src/llm/`: multi-model providers (OpenAI / Ollama / Anthropic / DeepSeek / Gemini, plus a local CLI mode)
 - `src/tools/`: note operation toolset
 - `src/memory/`: memory manager
 - `src/mcp/`: MCP client and manager

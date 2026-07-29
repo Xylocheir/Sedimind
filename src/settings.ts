@@ -83,6 +83,8 @@ export interface LLMChatSettings {
   maxTokens: number;
   temperature: number;
   maxConversationHistory: number;
+  /** 工具调用最大轮数（学 Copilot Max Iterations）：模型单次回答最多连续调用工具的次数，防止死循环，可配置 */
+  maxToolIterations: number;
 
   // 1M 上下文
   enable1MContext: boolean;
@@ -90,23 +92,36 @@ export interface LLMChatSettings {
   // ====== MCP 客户端设置 ======
   mcpServers: McpServerConfig[];
 
-  // ====== 记忆系统设置 ======
-  /** 是否启用近期对话记忆 */
-  enableRecentConversations: boolean;
-  /** 保留的近期对话数量 */
-  maxRecentConversations: number;
-  /** 是否启用保存记忆 */
-  enableSavedMemory: boolean;
-  /** 记忆文件夹路径（相对于 vault 根目录） */
+  // ====== 记忆系统设置（意识层） ======
+  /** 是否启用记忆系统（意识层：自动日记 + 长期画像注入） */
+  enableMemory: boolean;
+  /** 记忆文件夹路径（相对于 vault 根目录）；其下自动包含 journal/ 与 profile/ 子文件夹 */
   memoryFolderName: string;
+  /** 注入 system prompt 时回溯的日记天数 */
+  memoryJournalDays: number;
+  /** 记忆召回协议（借 MemPalace recall-protocol）：回答前强制先参考用户长期记忆与近期日记，默认开 */
+  forceMemoryRecall: boolean;
+  /** 画像自动失效天数：超过该天数的 profile 不再注入上下文（0=永不自动失效），磁盘仍保留 */
+  memoryProfileMaxAgeDays: number;
 
   // ====== 沉积层设置 ======
   // 沉积层与记忆系统严格分开：记忆系统存"成品"（摘要、声明记忆），
   // 沉积层只存 AI 思考的"副产物"（被诱导出的放弃思路）。
-  /** 是否启用沉积层（总开关；关闭后停止一切沉积、简报与状态栏） */
+  /** 是否启用沉积层（总开关；关闭后停止一切沉积、简报与状态栏；默认开启，核心功能） */
   enableSediment: boolean;
   /** 每日简报子开关：开启后 Obsidian 启动时生成当日沉积层日报（需总开关开启） */
   enableSedimentBriefing: boolean;
+  /** 沉积层深度分析（Phase 2）：变质/断层/矿脉/反差注入/每日衰减，默认关闭（隐私与性能默认最大） */
+  enableSedimentAnalysis: boolean;
+  sedimentMetamorph: { n: number; tDays: number; r: number };
+  sedimentCaps: { metamorphPerDay: number; faultPerDay: number };
+  sedimentInjection: { maxBlocks: number; maxTokens: number; maxCaptureInTokens: number };
+  sedimentDecay: { dailyFactor: number };
+  sedimentWeight: { survival: number; novelty: number; explore: number; contrast: number };
+  // Phase 3 主动进化
+  enableSedimentWormhole: boolean; // 实时虫洞（侵入式，默认关）
+  sedimentCompactionDays: number; // 压实周期（天）
+  sedimentCompactionMinAgeDays: number; // 参与压实的最旧化石年龄（天）
   /** 沉积层文件夹路径（相对于 vault 根目录） */
   sedimentFolderName: string;
 
@@ -205,18 +220,31 @@ export const DEFAULT_SETTINGS: LLMChatSettings = {
   maxTokens: 4096,
   temperature: 0.7,
   maxConversationHistory: 50,
+  maxToolIterations: 15,
   enable1MContext: false,
 
   mcpServers: [],
-  enableRecentConversations: true,
-  maxRecentConversations: 5,
-  enableSavedMemory: true,
+  enableMemory: true,
   memoryFolderName: "llm-chat/memory",
+  memoryJournalDays: 7,
+  forceMemoryRecall: true,
+  memoryProfileMaxAgeDays: 0,
 
-  // 沉积层默认关闭 —— 它是实验性的，且和现有记忆系统是两条路
-  enableSediment: false,
+  // 沉积层默认开启（核心功能；如需退回实验态可在设置关闭）
+  enableSediment: true,
   // 每日简报默认开启（仅当总开关开启时生效）
   enableSedimentBriefing: true,
+  // Phase 2 深度分析默认关闭（隐私与性能默认最大）
+  enableSedimentAnalysis: false,
+  sedimentMetamorph: { n: 3, tDays: 2, r: 1 },
+  sedimentCaps: { metamorphPerDay: 10, faultPerDay: 20 },
+  sedimentInjection: { maxBlocks: 6, maxTokens: 1500, maxCaptureInTokens: 2000 },
+  sedimentDecay: { dailyFactor: 0.9 },
+  sedimentWeight: { survival: 0.5, novelty: 0.3, explore: 0.2, contrast: 0.3 },
+  // Phase 3 主动进化
+  enableSedimentWormhole: false,
+  sedimentCompactionDays: 30,
+  sedimentCompactionMinAgeDays: 90,
   sedimentFolderName: ".sediment",
 
   showCopyNotice: true,
