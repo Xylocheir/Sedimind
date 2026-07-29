@@ -90,6 +90,23 @@ function finalizeChangelog(newVer, body, before, after) {
   return headNew + clean + after;
 }
 
+// README 版本徽章是写死静态文本（badge/version-X.Y.Z-blue），finalize 时一并替换，避免漏改。
+const READMES = ["README.md", "README_zh.md"];
+function updateReadmeBadges(newVer) {
+  const re = /version-\d+\.\d+\.\d+-blue/g;
+  const changed = [];
+  for (const f of READMES) {
+    if (!existsSync(f)) continue;
+    const c = readFileSync(f, "utf8");
+    const updated = c.replace(re, `version-${newVer}-blue`);
+    if (updated !== c) {
+      writeFileSync(f, updated);
+      changed.push(f);
+    }
+  }
+  return changed;
+}
+
 // ===== 主流程 =====
 const manifest = readJSON(MF);
 const pkg = existsSync(PKG) ? readJSON(PKG) : null;
@@ -132,6 +149,7 @@ const newVer = fmt(next);
 if (dry) {
   console.error(`[dry] current=${fmt(cur)} -> next=${newVer} (level=${level})`);
   console.error("[dry] 将把 [Unreleased] 折叠为: " + newVer);
+  console.error("[dry] 将同步更新 README 版本徽章 -> " + newVer);
   console.log(newVer);
   process.exit(0);
 }
@@ -152,5 +170,11 @@ if (pkg) {
 const versions = existsSync(VF) ? readJSON(VF) : {};
 versions[newVer] = manifest.minAppVersion || "1.5.0";
 writeJSON(VF, versions);
+
+// 写 README 版本徽章（写死静态文本，需同步）
+const badgeChanged = updateReadmeBadges(newVer);
+if (badgeChanged.length) {
+  console.error("[version-bump] 已更新版本徽章: " + badgeChanged.join(", "));
+}
 
 console.log(newVer);
