@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue)](https://github.com/Xylocheir/Sedimind/releases)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/Xylocheir/Sedimind/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0%2B-purple)](https://obsidian.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://obsidian.md)
